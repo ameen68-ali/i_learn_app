@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">iLearn</string>
+    <string name="app_tagline">منصة التعلّم الذاتي</string>
+    <string name="import_course">استيراد كورس</string>
+    <string name="add_course">إضافة كورس</string>
+    <string name="continue_learning">تابع التعلّم</string>
+    <string name="available_courses">الكورسات المتاحة</string>
+    <string name="no_courses">لم تتم إضافة أي كورسات بعد</string>
+</resources>

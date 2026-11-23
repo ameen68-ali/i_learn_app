@@ -1,0 +1,10 @@
+Generated with built-in image_gen using android/store/ilearn_icon_512.png as reference.
+
+Use case: ads-marketing.
+Asset type: square LinkedIn promotional graphic, final raster image.
+Primary request: Create a polished Arabic promotional image for the iLearn Android self-learning app using the provided icon as the central brand asset.
+Input image 1: existing official app icon, supporting compositing reference. Preserve its recognizable design exactly: rounded navy tile, glowing cyan lowercase i and teal/blue L with blue play triangle. Do not redesign the mark or substitute another logo.
+Scene/backdrop: elegant deep navy background with restrained cyan/teal glow and subtle geometric light accents, matching the icon.
+Composition: uncluttered, premium editorial app launch graphic; large faithful icon, balanced whitespace, crisp typography at social-feed scale, generous safe margins. Square canvas.
+Text (verbatim): "iLearn"; Arabic headline "تعلّم بطريقتك"; smaller Arabic line "تطبيق أندرويد • مفتوح للمساهمة". Render Arabic right-to-left with correctly joined letters and exact spelling.
+Constraints: no phone or fabricated app interface, no people, no screenshots, no claims about automatic AI dubbing, no extra brand logos, no extra copy, no watermark. Opaque background.

@@ -1,0 +1,26 @@
+# Local course content and processing tools
+/data/
+/pipeline/
+
+# Android and Gradle build output
+.gradle/
+.kotlin/
+build/
+.externalNativeBuild/
+.cxx/
+local.properties
+
+# Local signing keys and credentials
+*.jks
+*.keystore
+key.properties
+keystore.properties
+.env
+.env.*
+!.env.example
+
+# Editor and operating system files
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
