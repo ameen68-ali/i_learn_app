@@ -12,6 +12,11 @@ import com.ilearn.app.net.requireApiKey
 data class TutorMessage(val role: String, val text: String)
 data class TutorReply(val text: String, val usage: String = "")
 
+private fun JSONObject?.optNonNullString(key: String): String {
+    if (this == null || isNull(key)) return ""
+    return optString(key, "")
+}
+
 object ProviderCodec {
     fun request(p: ProviderProfile, system: String, messages: List<TutorMessage>): Pair<String, JSONObject> {
         p.validate()
@@ -45,36 +50,48 @@ object ProviderCodec {
         return "${p.endpoint.trimEnd('/')}/$path" to body
     }
 
+    private fun extractOpenAiContent(message: JSONObject?): String {
+        if (message == null || message.isNull("content")) return ""
+        val raw = message.opt("content") ?: return ""
+        return when (raw) {
+            is String -> raw
+            is JSONArray -> (0 until raw.length()).joinToString("") { i ->
+                raw.optJSONObject(i).optNonNullString("text")
+            }
+            else -> ""
+        }
+    }
+
     fun text(format: ApiFormat, json: JSONObject, streaming: Boolean): String {
         val finish = when (format) {
-            ApiFormat.OPENAI_CHAT -> json.optJSONArray("choices")?.optJSONObject(0)?.optString("finish_reason")
-            ApiFormat.OPENAI_RESPONSES -> json.optString("status").ifBlank { json.optJSONObject("response")?.optString("status").orEmpty() }
-            ApiFormat.ANTHROPIC -> json.optString("stop_reason").ifBlank { json.optJSONObject("delta")?.optString("stop_reason").orEmpty() }
-            ApiFormat.GEMINI -> json.optJSONArray("candidates")?.optJSONObject(0)?.optString("finishReason")
+            ApiFormat.OPENAI_CHAT -> json.optJSONArray("choices")?.optJSONObject(0).optNonNullString("finish_reason")
+            ApiFormat.OPENAI_RESPONSES -> json.optNonNullString("status").ifBlank { json.optJSONObject("response").optNonNullString("status") }
+            ApiFormat.ANTHROPIC -> json.optNonNullString("stop_reason").ifBlank { json.optJSONObject("delta").optNonNullString("stop_reason") }
+            ApiFormat.GEMINI -> json.optJSONArray("candidates")?.optJSONObject(0).optNonNullString("finishReason")
         }
         check(finish !in setOf("length", "content_filter", "max_tokens", "MAX_TOKENS", "SAFETY", "RECITATION", "incomplete", "failed")) {
             "Provider stopped before completing the answer. Increase the output limit or ask a narrower question."
         }
         return when (format) {
-        ApiFormat.OPENAI_CHAT -> json.optJSONArray("choices")?.optJSONObject(0)?.let { choice ->
-            val message = choice.optJSONObject(if (streaming) "delta" else "message")
-            if (!message?.optString("refusal").isNullOrBlank()) throw IllegalStateException("The provider declined this request")
-            message?.optString("content", "") ?: ""
-        } ?: ""
-        ApiFormat.OPENAI_RESPONSES -> if (streaming) {
-            when (json.optString("type")) {
-                "response.output_text.delta" -> json.optString("delta")
-                "response.refusal.delta" -> throw IllegalStateException("The provider declined this request")
-                else -> ""
-            }
-        } else json.optJSONArray("output")?.let { output -> (0 until output.length()).joinToString("") { i ->
-            output.optJSONObject(i)?.optJSONArray("content")?.let { content -> (0 until content.length()).joinToString("") { j -> content.optJSONObject(j)?.optString("text", "") ?: "" } } ?: ""
-        } } ?: ""
-        ApiFormat.ANTHROPIC -> if (streaming) json.optJSONObject("delta")?.optString("text", "") ?: ""
-            else json.optJSONArray("content")?.let { a -> (0 until a.length()).joinToString("") { a.optJSONObject(it)?.optString("text", "") ?: "" } } ?: ""
-        ApiFormat.GEMINI -> json.optJSONArray("candidates")?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")?.let { a ->
-            (0 until a.length()).filter { a.optJSONObject(it)?.optBoolean("thought") != true }.joinToString("") { a.optJSONObject(it)?.optString("text", "") ?: "" }
-        } ?: ""
+            ApiFormat.OPENAI_CHAT -> json.optJSONArray("choices")?.optJSONObject(0)?.let { choice ->
+                val message = choice.optJSONObject(if (streaming) "delta" else "message")
+                if (message.optNonNullString("refusal").isNotBlank()) throw IllegalStateException("The provider declined this request")
+                extractOpenAiContent(message)
+            } ?: ""
+            ApiFormat.OPENAI_RESPONSES -> if (streaming) {
+                when (json.optNonNullString("type")) {
+                    "response.output_text.delta" -> json.optNonNullString("delta")
+                    "response.refusal.delta" -> throw IllegalStateException("The provider declined this request")
+                    else -> ""
+                }
+            } else json.optJSONArray("output")?.let { output -> (0 until output.length()).joinToString("") { i ->
+                output.optJSONObject(i)?.optJSONArray("content")?.let { content -> (0 until content.length()).joinToString("") { j -> content.optJSONObject(j).optNonNullString("text") } } ?: ""
+            } } ?: ""
+            ApiFormat.ANTHROPIC -> if (streaming) json.optJSONObject("delta").optNonNullString("text")
+            else json.optJSONArray("content")?.let { a -> (0 until a.length()).joinToString("") { a.optJSONObject(it).optNonNullString("text") } } ?: ""
+            ApiFormat.GEMINI -> json.optJSONArray("candidates")?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")?.let { a ->
+                (0 until a.length()).filter { a.optJSONObject(it)?.optBoolean("thought") != true }.joinToString("") { a.optJSONObject(it).optNonNullString("text") }
+            } ?: ""
         }
     }
 }
@@ -112,13 +129,13 @@ class ProviderTransport(client: OkHttpClient = sharedClient) {
                         val json = try { JSONObject(data) } catch (e: org.json.JSONException) {
                             throw IllegalStateException("Provider returned a malformed JSON event (${data.length} characters)", e)
                         }
-                        check(!json.has("error") && json.optString("type") !in setOf("error", "response.failed", "response.incomplete")) { "Provider could not complete the answer" }
+                        check(json.isNull("error") && json.optNonNullString("type") !in setOf("error", "response.failed", "response.incomplete")) { "Provider could not complete the answer" }
                         val delta = ProviderCodec.text(p.format, json, p.stream)
                         completed = completed || when (p.format) {
-                            ApiFormat.OPENAI_CHAT -> json.optJSONArray("choices")?.optJSONObject(0)?.optString("finish_reason") == "stop"
-                            ApiFormat.OPENAI_RESPONSES -> json.optString("type") == "response.completed"
-                            ApiFormat.ANTHROPIC -> json.optString("type") == "message_stop"
-                            ApiFormat.GEMINI -> json.optJSONArray("candidates")?.optJSONObject(0)?.optString("finishReason") == "STOP"
+                            ApiFormat.OPENAI_CHAT -> json.optJSONArray("choices")?.optJSONObject(0).optNonNullString("finish_reason") == "stop"
+                            ApiFormat.OPENAI_RESPONSES -> json.optNonNullString("type") == "response.completed"
+                            ApiFormat.ANTHROPIC -> json.optNonNullString("type") == "message_stop"
+                            ApiFormat.GEMINI -> json.optJSONArray("candidates")?.optJSONObject(0).optNonNullString("finishReason") == "STOP"
                         }
                         result.append(delta); require(result.length <= 120000) { "Provider answer exceeds the safety limit" }
                         val u = json.optJSONObject("usage") ?: json.optJSONObject("usageMetadata") ?: json.optJSONObject("response")?.optJSONObject("usage") ?: json.optJSONObject("message")?.optJSONObject("usage")

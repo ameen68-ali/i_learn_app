@@ -40,5 +40,14 @@ class GroundingTest {
         }
         assertEquals("Lesson evidence", tag)
         assertEquals("See [01:05] here.", body)
+        val (_, cleanedNulls) = TutorGrounding.stripTagsAndReplaceCitations("[Lesson evidence]\nnullnullnullHello", listOf(src)) { "00:00" }
+        assertEquals("Hello", cleanedNulls)
+    }
+    @Test fun summaryRetrievalCoversFullLectureNotJustOpening() {
+        val cues = (0 until 60).map { i -> SourcePassage("p-$i", "Segment $i content", i * 60_000L, (i + 1) * 60_000L) }
+        val retrieved = TranscriptParser.retrieve(cues, "لخّص أهم نقاط هذا الدرس", 0L, 10_000)
+        assertTrue(retrieved.first().id == "p-0")
+        assertTrue(retrieved.last().id == "p-59")
+        assertTrue(retrieved.any { it.id == "p-30" })
     }
 }

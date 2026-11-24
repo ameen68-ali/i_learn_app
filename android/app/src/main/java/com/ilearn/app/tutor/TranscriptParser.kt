@@ -43,25 +43,57 @@ object TranscriptParser {
     }
 
     fun retrieve(passages: List<SourcePassage>, question: String, positionMs: Long, maxChars: Int): List<SourcePassage> {
+        if (passages.isEmpty()) return emptyList()
         val stopWords = setOf("explain", "lesson", "simply", "give", "what", "does", "the", "how", "why", "here", "this", "around", "about", "and", "for", "with", "from")
-        val terms = question.lowercase().split(Regex("[^\\p{L}\\p{N}]+" )).filter { it.length > 1 && it !in stopWords }.toSet()
-        val ranked = passages.indices.sortedByDescending { index ->
-            val p = passages[index]
-            terms.count { p.text.lowercase().contains(it) } * 10 +
-                if (p.startMs != null && kotlin.math.abs(p.startMs - positionMs) < 30_000) 5 else 0
+        val normalizedQ = question.lowercase()
+        val isOverview = listOf("لخص", "لخّص", "ملخص", "خلاصة", "محاور", "summarize", "summary", "overview", "recap", "main points", "key points").any { it in normalizedQ }
+        val terms = normalizedQ.split(Regex("[^\\p{L}\\p{N}]+")).filter { it.length > 1 && it !in stopWords }.toSet()
+        val termHits = passages.map { p ->
+            val lower = p.text.lowercase()
+            terms.count { lower.contains(it) }
         }
-        if (ranked.isEmpty() || passages[ranked.first()].text.length > maxChars) return emptyList()
+        val hasKeywordHit = termHits.any { it > 0 }
         var remaining = maxChars
         val selected = linkedSetOf<Int>()
+        val maxPassages = if (isOverview || !hasKeywordHit) 48 else 24
+
         fun add(index: Int) {
-            if (index in passages.indices && index !in selected && selected.size < 24 && passages[index].text.length <= remaining) {
-                remaining -= passages[index].text.length; selected.add(index)
+            if (index in passages.indices && index !in selected && selected.size < maxPassages && passages[index].text.length <= remaining) {
+                remaining -= passages[index].text.length
+                selected.add(index)
             }
         }
-        for (index in ranked) {
-            if (selected.size >= 24) break
-            add(index)
-            if (index in selected) { add(index - 1); add(index + 1) }
+
+        if (isOverview || !hasKeywordHit) {
+            if (!isOverview) {
+                passages.indices
+                    .filter { passages[it].startMs != null && kotlin.math.abs(passages[it].startMs!! - positionMs) < 30_000 }
+                    .forEach { add(it) }
+            }
+            val total = passages.size
+            val targetCount = minOf(total, maxPassages)
+            if (targetCount > 0) {
+                for (slot in 0 until targetCount) {
+                    val idx = if (targetCount == 1) 0 else (slot * (total - 1)) / (targetCount - 1)
+                    add(idx)
+                }
+            }
+            for (idx in passages.indices) {
+                if (selected.size >= maxPassages) break
+                add(idx)
+            }
+        } else {
+            val ranked = passages.indices.sortedByDescending { index ->
+                val p = passages[index]
+                termHits[index] * 10 +
+                    if (p.startMs != null && kotlin.math.abs(p.startMs - positionMs) < 30_000) 5 else 0
+            }
+            if (passages[ranked.first()].text.length > maxChars) return emptyList()
+            for (index in ranked) {
+                if (selected.size >= maxPassages) break
+                add(index)
+                if (index in selected) { add(index - 1); add(index + 1) }
+            }
         }
         return selected.sorted().map { passages[it] }
     }

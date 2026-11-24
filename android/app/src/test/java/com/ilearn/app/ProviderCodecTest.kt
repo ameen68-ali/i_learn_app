@@ -22,6 +22,12 @@ class ProviderCodecTest {
         assertEquals("Yes", ProviderCodec.text(ApiFormat.ANTHROPIC, JSONObject("""{"delta":{"type":"text_delta","text":"Yes"}}"""), true))
         assertEquals("Answer", ProviderCodec.text(ApiFormat.GEMINI, JSONObject("""{"candidates":[{"content":{"parts":[{"thought":true,"text":"private"},{"text":"Answer"}]}}]}"""), true))
     }
+    @Test fun explicitJsonNullFieldsNeverEmitLiteralNullText() {
+        assertEquals("", ProviderCodec.text(ApiFormat.OPENAI_CHAT, JSONObject("""{"choices":[{"finish_reason":null,"delta":{"content":null,"refusal":null,"reasoning_content":"step"}}]}"""), true))
+        assertEquals("Hi", ProviderCodec.text(ApiFormat.OPENAI_CHAT, JSONObject("""{"choices":[{"finish_reason":null,"message":{"content":"Hi","refusal":null}}]}"""), false))
+        assertEquals("", ProviderCodec.text(ApiFormat.OPENAI_RESPONSES, JSONObject("""{"type":"response.output_text.delta","delta":null}"""), true))
+        assertEquals("", ProviderCodec.text(ApiFormat.ANTHROPIC, JSONObject("""{"delta":{"text":null}}"""), true))
+    }
     @Test fun rejectUnsafeEndpoints() {
         for (url in listOf("http://example.test", "https://user:secret@example.test", "https://example.test?key=secret", "https://example.test/#fragment")) {
             assertTrue(runCatching { profile(ApiFormat.OPENAI_CHAT).copy(endpoint = url).validate() }.isFailure)

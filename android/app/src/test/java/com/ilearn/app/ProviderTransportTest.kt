@@ -35,7 +35,7 @@ class ProviderTransportTest {
         val server = server()
         try {
             server.enqueue(MockResponse().setHeader("Content-Type", "text/event-stream").setChunkedBody(
-                "data: {\"choices\":[{\"delta\":{\"content\":\"Hello \"}}]}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"العربية\"}}]}\n\ndata: [DONE]\n\n", 7))
+                "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"thinking\",\"content\":null,\"refusal\":null}}],\"error\":null}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"Hello \"}}]}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"العربية\"}}]}\n\ndata: [DONE]\n\n", 7))
             val partials = mutableListOf<String>()
             val result = transport().generate(profile(server), "fixture-key", "Evidence", listOf(TutorMessage("user", "Explain"))) { partials.add(it) }
             assertEquals("Hello العربية", result.text)

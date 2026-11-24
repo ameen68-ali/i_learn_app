@@ -26,9 +26,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -879,11 +885,11 @@ private fun ChatBubble(
                 }
 
                 SelectionContainer {
-                    Text(
-                        text = displayBody,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (isUser) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
-                        lineHeight = 21.sp
+                    FormattedChatText(
+                        rawText = displayBody,
+                        textColor = if (isUser) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                        accentColor = MaterialTheme.colorScheme.primary,
+                        codeBg = MaterialTheme.colorScheme.surfaceVariant
                     )
                 }
 
@@ -938,14 +944,164 @@ private fun StreamingTutorBubble(partialText: String) {
                 )
                 if (partialText.isNotBlank()) {
                     SelectionContainer {
-                        Text(
-                            text = partialText,
-                            style = MaterialTheme.typography.bodyMedium,
-                            lineHeight = 21.sp
+                        FormattedChatText(
+                            rawText = partialText,
+                            textColor = MaterialTheme.colorScheme.onSurface,
+                            accentColor = MaterialTheme.colorScheme.primary,
+                            codeBg = MaterialTheme.colorScheme.surfaceVariant
                         )
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun FormattedChatText(
+    rawText: String,
+    textColor: Color,
+    accentColor: Color,
+    codeBg: Color
+) {
+    val lines = remember(rawText) { rawText.replace("\r\n", "\n").lines() }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        lines.forEach { rawLine ->
+            val trimmed = rawLine.trim()
+            when {
+                trimmed.isEmpty() -> Spacer(modifier = Modifier.height(2.dp))
+                trimmed == "---" || trimmed == "***" -> HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                trimmed.startsWith("#") -> {
+                    val level = trimmed.takeWhile { it == '#' }.length.coerceIn(1, 4)
+                    val heading = trimmed.drop(level).trim()
+                    Text(
+                        text = remember(heading, accentColor, codeBg) { formatInlineMarkdown(heading, accentColor, codeBg) },
+                        style = if (level <= 2) MaterialTheme.typography.titleSmall else MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = textColor
+                    )
+                }
+                trimmed.startsWith(">") -> {
+                    val quote = trimmed.removePrefix(">").trim()
+                    Surface(
+                        color = codeBg.copy(alpha = 0.6f),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = remember(quote, accentColor, codeBg) { formatInlineMarkdown(quote, accentColor, codeBg) },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = textColor.copy(alpha = 0.9f),
+                            lineHeight = 20.sp,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                        )
+                    }
+                }
+                trimmed.startsWith("- ") || trimmed.startsWith("* ") -> {
+                    val itemText = trimmed.drop(2).trim()
+                    Text(
+                        text = remember(itemText, accentColor, codeBg) {
+                            buildAnnotatedString {
+                                append("• ")
+                                append(formatInlineMarkdown(itemText, accentColor, codeBg))
+                            }
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = textColor,
+                        lineHeight = 21.sp
+                    )
+                }
+                else -> {
+                    Text(
+                        text = remember(rawLine, accentColor, codeBg) { formatInlineMarkdown(rawLine, accentColor, codeBg) },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = textColor,
+                        lineHeight = 21.sp
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun cleanInlineMath(text: String): String {
+    var out = text
+    out = out.replace(Regex("\\$\\$([^$]+)\\$\\$")) { it.groupValues[1].trim() }
+    out = out.replace(Regex("\\$([^$]+)\\$")) { it.groupValues[1].trim() }
+    out = out.replace("\\operatorname{atan2}", "atan2")
+        .replace("\\operatorname{", "")
+        .replace("\\frac{", "(")
+        .replace("}{", ") / (")
+        .replace("\\;", " ")
+        .replace("\\,", " ")
+        .replace("\\quad", "  ")
+        .replace("\\theta", "θ")
+        .replace("\\alpha", "α")
+        .replace("\\beta", "β")
+        .replace("\\gamma", "γ")
+        .replace("\\delta", "δ")
+        .replace("\\lambda", "λ")
+        .replace("\\mu", "μ")
+        .replace("\\sigma", "σ")
+        .replace("\\pi", "π")
+        .replace("\\cos", "cos")
+        .replace("\\sin", "sin")
+        .replace("\\tan", "tan")
+        .replace("\\log", "log")
+        .replace("\\sqrt", "√")
+        .replace("\\cdot", "·")
+        .replace("\\times", "×")
+        .replace("\\approx", "≈")
+        .replace("\\le", "≤")
+        .replace("\\ge", "≥")
+        .replace("\\ne", "≠")
+        .replace("\\to", "→")
+        .replace("\\rightarrow", "→")
+        .replace("\\sum", "∑")
+        .replace("\\int", "∫")
+        .replace("\\infty", "∞")
+        .replace("\\left", "")
+        .replace("\\right", "")
+    return out
+}
+
+private fun formatInlineMarkdown(input: String, accentColor: Color, codeBg: Color): AnnotatedString {
+    val normalized = cleanInlineMath(input)
+    val pattern = Regex("(\\*\\*[^*]+\\*\\*|`[^`]+`|\\*[^*]+\\*|\\[\\d{2}:\\d{2}(?::\\d{2})?\\])")
+    return buildAnnotatedString {
+        var cursor = 0
+        for (match in pattern.findAll(normalized)) {
+            if (match.range.first > cursor) {
+                append(normalized.substring(cursor, match.range.first))
+            }
+            val token = match.value
+            when {
+                token.startsWith("**") && token.endsWith("**") && token.length > 4 -> {
+                    withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                        append(token.substring(2, token.length - 2))
+                    }
+                }
+                token.startsWith("`") && token.endsWith("`") && token.length > 2 -> {
+                    withStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = codeBg.copy(alpha = 0.7f))) {
+                        append(token.substring(1, token.length - 1))
+                    }
+                }
+                token.startsWith("*") && token.endsWith("*") && token.length > 2 -> {
+                    withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
+                        append(token.substring(1, token.length - 1))
+                    }
+                }
+                token.startsWith("[") && token.endsWith("]") -> {
+                    withStyle(SpanStyle(color = accentColor, fontWeight = FontWeight.Bold)) {
+                        append(token)
+                    }
+                }
+                else -> append(token)
+            }
+            cursor = match.range.last + 1
+        }
+        if (cursor < normalized.length) {
+            append(normalized.substring(cursor))
         }
     }
 }

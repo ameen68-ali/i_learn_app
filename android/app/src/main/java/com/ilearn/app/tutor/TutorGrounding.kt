@@ -53,7 +53,8 @@ object TutorGrounding {
     ): Pair<String?, String> {
         val knownTags = listOf("[Lesson evidence]", "[General help]", "[Unverified answer]")
         val tag = knownTags.firstOrNull { rawMessage.startsWith("$it\n") }
-        val body = if (tag != null) rawMessage.removePrefix("$tag\n") else rawMessage
+        val body = (if (tag != null) rawMessage.removePrefix("$tag\n") else rawMessage)
+            .replace(Regex("^(null){2,}"), "")
         val byId = sources.associateBy { it.id }
         val cleanBody = reference.replace(body) { match ->
             val src = byId[match.groupValues[1]]
