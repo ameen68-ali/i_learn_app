@@ -8,6 +8,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -201,7 +202,7 @@ fun YouTubeImportScreen(
                 shape = RoundedCornerShape(14.dp),
                 modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)
             ) {
-                Icon(Icons.Default.PlaylistPlay, contentDescription = null)
+                Icon(Icons.AutoMirrored.Filled.PlaylistPlay, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("معاينة الكورس • Preview playlist", fontWeight = FontWeight.Bold)
             }

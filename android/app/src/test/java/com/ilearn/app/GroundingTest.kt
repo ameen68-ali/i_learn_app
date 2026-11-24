@@ -36,7 +36,7 @@ class GroundingTest {
         val src = SourcePassage("abcdef123456-1", "Derivative rule", 65000, 70000)
         val (tag, body) = TutorGrounding.stripTagsAndReplaceCitations("[Lesson evidence]\nSee [abcdef123456-1] here.", listOf(src)) { ms ->
             val s = ms / 1000
-            String.format("%02d:%02d", s / 60, s % 60)
+            String.format(java.util.Locale.US, "%02d:%02d", s / 60, s % 60)
         }
         assertEquals("Lesson evidence", tag)
         assertEquals("See [01:05] here.", body)

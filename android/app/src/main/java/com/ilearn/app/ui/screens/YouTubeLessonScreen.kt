@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.NavigateBefore
 import androidx.compose.material.icons.automirrored.filled.NavigateNext
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -229,7 +230,7 @@ fun YouTubeLessonScreen(
                             )
                             if (lesson.remoteId != null) {
                                 OutlinedButton(onClick = ::openExternalYouTube) {
-                                    Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text("فتح في YouTube")
                                 }
@@ -269,7 +270,7 @@ fun YouTubeLessonScreen(
                                     }
                                     if (lesson.remoteId != null) {
                                         OutlinedButton(onClick = ::openExternalYouTube) {
-                                            Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
                                             Spacer(modifier = Modifier.width(6.dp))
                                             Text("YouTube ↗")
                                         }
@@ -299,7 +300,7 @@ fun YouTubeLessonScreen(
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.heightIn(min = 48.dp)
                         ) {
-                            Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(4.dp))
                             Text("YouTube")
                         }
