@@ -23,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -47,6 +48,7 @@ import com.ilearn.app.youtube.YouTubeTranscriptClient
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -893,26 +895,70 @@ private fun ChatBubble(
                     )
                 }
 
-                if (citations.isNotEmpty()) {
+                if (!isUser) {
+                    val clipboard = LocalClipboardManager.current
+                    var copied by remember(message.text) { mutableStateOf(false) }
+                    LaunchedEffect(copied) {
+                        if (copied) {
+                            delay(1500)
+                            copied = false
+                        }
+                    }
                     Row(
-                        modifier = Modifier.horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        citations.forEach { src ->
-                            if (src.startMs != null) {
-                                AssistChip(
-                                    onClick = { onSeek(src.startMs) },
-                                    label = { Text(formatTimeMs(src.startMs), style = MaterialTheme.typography.labelSmall) },
-                                    leadingIcon = {
-                                        Icon(
-                                            Icons.Default.PlayArrow,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(14.dp)
+                        if (citations.isNotEmpty()) {
+                            Row(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                citations.forEach { src ->
+                                    if (src.startMs != null) {
+                                        AssistChip(
+                                            onClick = { onSeek(src.startMs) },
+                                            label = { Text(formatTimeMs(src.startMs), style = MaterialTheme.typography.labelSmall) },
+                                            leadingIcon = {
+                                                Icon(
+                                                    Icons.Default.PlayArrow,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                            },
+                                            shape = RoundedCornerShape(10.dp)
                                         )
-                                    },
-                                    shape = RoundedCornerShape(10.dp)
-                                )
+                                    }
+                                }
                             }
+                        } else {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
+
+                        TextButton(
+                            onClick = {
+                                clipboard.setText(AnnotatedString(displayBody))
+                                copied = true
+                            },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                            modifier = Modifier
+                                .heightIn(min = 32.dp)
+                                .semantics { contentDescription = "نسخ الرد" }
+                        ) {
+                            Icon(
+                                imageVector = if (copied) Icons.Default.Check else Icons.Default.ContentCopy,
+                                contentDescription = null,
+                                tint = if (copied) Color(0xFF10B981) else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = if (copied) "تم النسخ" else "نسخ",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (copied) Color(0xFF10B981) else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
                 }
