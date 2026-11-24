@@ -16,6 +16,12 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.ilearn.app.data.SourceType
+import com.ilearn.app.tutor.ProviderProfileStore
+import com.ilearn.app.ui.screens.YouTubeImportScreen
+import com.ilearn.app.ui.screens.YouTubeLessonScreen
+import com.ilearn.app.ui.screens.ProviderSettingsScreen
+import com.ilearn.app.ui.screens.TutorDialog
 import com.ilearn.app.data.CourseRepository
 import com.ilearn.app.data.Lesson
 import com.ilearn.app.data.LessonNote
@@ -32,12 +38,14 @@ import java.util.UUID
 class MainActivity : ComponentActivity() {
 
     private lateinit var repository: CourseRepository
+    private lateinit var providerProfiles: ProviderProfileStore
     private lateinit var playerController: ILearnPlayerController
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         repository = CourseRepository(this)
+        providerProfiles = ProviderProfileStore(this)
         playerController = ILearnPlayerController(this)
 
         // Initial fetch of courses and progress
@@ -77,7 +85,18 @@ class MainActivity : ComponentActivity() {
                                     },
                                     onDeleteCourse = { course ->
                                         lifecycleScope.launch {
-                                            repository.deleteCourse(course)
+                                            try {
+                                                val lessonsToDelete = repository.getLessonsForCourse(course.id)
+                                                withContext(Dispatchers.IO) {
+                                                    val privateData = com.ilearn.app.tutor.LessonSourceStore(this@MainActivity)
+                                                    privateData.deleteLessons(lessonsToDelete)
+                                                }
+                                                repository.deleteCourse(course)
+                                            } catch (e: kotlinx.coroutines.CancellationException) {
+                                                throw e
+                                            } catch (_: Exception) {
+                                                android.widget.Toast.makeText(this@MainActivity, "Unable to remove all course data. Check storage access and try again.", android.widget.Toast.LENGTH_LONG).show()
+                                            }
                                         }
                                     },
                                     onDismissImportState = {
@@ -92,10 +111,19 @@ class MainActivity : ComponentActivity() {
                                     onGetStorageInfo = {
                                         repository.getStorageSizeInfo()
                                     },
-                                    onClearCache = {
-                                        repository.clearCache()
-                                    }
+                                    onClearCache = { repository.clearCache() },
+                                    onAddYouTube = { navController.navigate("youtube_import") },
+                                    onApiSettings = { playerController.pause(); navController.navigate("api_settings") }
                                 )
+                            }
+
+                            composable("api_settings") {
+                                ProviderSettingsScreen(providerProfiles) { navController.popBackStack() }
+                            }
+                            composable("youtube_import?playlist={playlist}", arguments = listOf(navArgument("playlist") { defaultValue = "" })) { entry ->
+                                YouTubeImportScreen(repository, entry.arguments?.getString("playlist")?.takeIf { it.isNotBlank() },
+                                    onBack = { navController.popBackStack() },
+                                    onImported = { id -> navController.popBackStack(); navController.navigate("course_detail/$id") { launchSingleTop = true } })
                             }
 
                             // 2. Course Detail / Lessons List Screen
@@ -116,6 +144,7 @@ class MainActivity : ComponentActivity() {
                                     CourseDetailScreen(
                                         course = currentCourse,
                                         lessons = lessons,
+                                        onRefresh = { currentCourse.remoteId?.let { navController.navigate("youtube_import?playlist=$it") } },
                                         onBack = {
                                             playerController.pause()
                                             navController.popBackStack()
@@ -162,9 +191,25 @@ class MainActivity : ComponentActivity() {
                                 }
 
                                 activeLesson?.let { lesson ->
-                                    VideoPlayerScreen(
+                                    var tutorPosition by remember(lesson.id) { mutableStateOf<Long?>(null) }
+                                    if (lesson.sourceType == SourceType.YOUTUBE) {
+                                        YouTubeLessonScreen(lesson, allLessons, notes, providerProfiles,
+                                            onBack = { navController.popBackStack() },
+                                            onNavigate = { target -> navController.navigate("player/${target.courseId}/${target.id}") { popUpTo("player/{courseId}/{lessonId}") { inclusive = true } } },
+                                            onProgress = { pos, dur -> lifecycleScope.launch { repository.updateLessonProgress(lesson.id, lesson.courseId, pos, dur) } },
+                                            onBookmark = { marked -> lifecycleScope.launch {
+                                                repository.toggleBookmark(lesson.id, lesson.courseId, marked)
+                                                allLessons = repository.getLessonsForCourse(courseId); activeLesson = allLessons.firstOrNull { it.id == lesson.id }
+                                            } },
+                                            onAddNote = { time, text -> lifecycleScope.launch {
+                                                repository.insertNote(LessonNote(UUID.randomUUID().toString(), lesson.id, courseId, time, text)); notes = repository.getNotesForLesson(lesson.id)
+                                            } },
+                                            onDeleteNote = { id -> lifecycleScope.launch { repository.deleteNote(id); notes = repository.getNotesForLesson(lesson.id) } },
+                                            onSettings = { navController.navigate("api_settings") })
+                                    } else VideoPlayerScreen(
                                         lesson = lesson,
                                         courseTitle = currentCourse?.title ?: "iLearn",
+                                        onTutor = { position -> playerController.pause(); tutorPosition = position },
                                         allLessons = allLessons,
                                         notes = notes,
                                         playerController = playerController,
@@ -173,9 +218,8 @@ class MainActivity : ComponentActivity() {
                                             navController.popBackStack()
                                         },
                                         onNavigateLesson = { targetLesson ->
-                                            activeLesson = targetLesson
-                                            lifecycleScope.launch {
-                                                notes = repository.getNotesForLesson(targetLesson.id)
+                                            navController.navigate("player/${targetLesson.courseId}/${targetLesson.id}") {
+                                                popUpTo("player/{courseId}/{lessonId}") { inclusive = true }
                                             }
                                         },
                                         onSaveProgress = { targetLessonId, targetCourseId, pos, dur ->
@@ -229,6 +273,12 @@ class MainActivity : ComponentActivity() {
                                             success
                                         }
                                     )
+                                    tutorPosition?.let { position ->
+                                        TutorDialog(lesson, position, providerProfiles,
+                                            onSeek = { playerController.seekTo(it); tutorPosition = null },
+                                            onSettings = { navController.navigate("api_settings") },
+                                            onClose = { tutorPosition = null })
+                                    }
                                 }
                             }
                         }

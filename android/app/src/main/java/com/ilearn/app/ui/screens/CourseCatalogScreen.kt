@@ -55,7 +55,9 @@ fun CourseCatalogScreen(
     onExportBackupToUri: suspend (Uri) -> Boolean,
     onImportBackupFromUri: suspend (Uri) -> Boolean,
     onGetStorageInfo: suspend () -> Pair<Long, Long>,
-    onClearCache: suspend () -> Unit
+    onClearCache: suspend () -> Unit,
+    onAddYouTube: () -> Unit,
+    onApiSettings: () -> Unit
 ) {
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -239,6 +241,8 @@ fun CourseCatalogScreen(
                                     showAboutDialog = true
                                 }
                             )
+                            DropdownMenuItem(text = { Text("إضافة كورس من YouTube") }, onClick = { showMenu = false; onAddYouTube() })
+                            DropdownMenuItem(text = { Text("AI providers • إعدادات المعلّم") }, onClick = { showMenu = false; onApiSettings() })
                             HorizontalDivider()
                             DropdownMenuItem(
                                 text = { Text("تصدير نسخة احتياطية (JSON)") },

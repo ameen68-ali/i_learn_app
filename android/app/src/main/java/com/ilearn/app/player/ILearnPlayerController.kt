@@ -35,6 +35,7 @@ enum class SubtitleSize(val labelAr: String, val scale: Float, val previewSp: In
     EXTRA_LARGE("كبير جداً", 1.95f, 24)
 }
 
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class ILearnPlayerController(private val context: Context) {
 
     val exoPlayer: ExoPlayer = ExoPlayer.Builder(context).build()
@@ -69,6 +70,7 @@ class ILearnPlayerController(private val context: Context) {
     val currentSubtitles: StateFlow<String?> = _currentSubtitles.asStateFlow()
 
     private var activeLesson: Lesson? = null
+    val activeLessonId: String? get() = activeLesson?.id
 
     init {
         exoPlayer.playWhenReady = true

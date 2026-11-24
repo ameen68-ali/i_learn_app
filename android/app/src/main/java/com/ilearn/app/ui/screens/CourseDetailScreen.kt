@@ -47,6 +47,7 @@ fun CourseDetailScreen(
     course: Course,
     lessons: List<Lesson>,
     onBack: () -> Unit,
+    onRefresh: () -> Unit,
     onSelectLesson: (Lesson) -> Unit,
     onToggleLessonCompleted: (Lesson, Boolean) -> Unit,
     onToggleLessonBookmarked: (Lesson, Boolean) -> Unit
@@ -119,6 +120,7 @@ fun CourseDetailScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
                     }
                 },
+                actions = { if (course.sourceType == com.ilearn.app.data.SourceType.YOUTUBE) TextButton(onClick = onRefresh) { Text("Refresh") } },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface
                 )

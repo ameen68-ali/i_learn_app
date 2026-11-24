@@ -18,11 +18,11 @@ import java.util.*
  * Native Android SQLite database for persisting courses, lessons, student progress,
  * bookmarks, notes, audio tracks, and study analytics.
  */
-class CourseDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
+class CourseDatabaseHelper(context: Context, databaseName: String = DATABASE_NAME) : SQLiteOpenHelper(context, databaseName, null, DATABASE_VERSION) {
 
     companion object {
         private const val DATABASE_NAME = "ilearn.db"
-        private const val DATABASE_VERSION = 3
+        private const val DATABASE_VERSION = 4
 
         // Tables
         private const val TABLE_COURSES = "courses"
@@ -116,6 +116,7 @@ class CourseDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABAS
                 FOREIGN KEY ($COL_LESSON_ID) REFERENCES $TABLE_LESSONS($COL_ID) ON DELETE CASCADE
             )
         """)
+        addSourceColumns(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -137,10 +138,27 @@ class CourseDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABAS
             """)
         }
 
+        if (oldVersion < 4) addSourceColumns(db)
+
         if (oldVersion < 3) {
             try {
                 db.execSQL("ALTER TABLE $TABLE_LESSONS ADD COLUMN $COL_AUDIO_AR_PATH TEXT")
             } catch (_: Exception) {}
+        }
+    }
+
+    private fun addSourceColumns(db: SQLiteDatabase) {
+        db.execSQL("ALTER TABLE courses ADD COLUMN source_type TEXT NOT NULL DEFAULT 'LOCAL'")
+        db.execSQL("ALTER TABLE courses ADD COLUMN remote_id TEXT")
+        db.execSQL("ALTER TABLE courses ADD COLUMN last_synced_at INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE lessons ADD COLUMN source_type TEXT NOT NULL DEFAULT 'LOCAL'")
+        db.execSQL("ALTER TABLE lessons ADD COLUMN remote_id TEXT")
+        db.execSQL("ALTER TABLE lessons ADD COLUMN available INTEGER NOT NULL DEFAULT 1")
+    }
+
+    private fun upsert(db: SQLiteDatabase, table: String, values: ContentValues) {
+        if (db.insertWithOnConflict(table, null, values, SQLiteDatabase.CONFLICT_IGNORE) == -1L) {
+            check(db.update(table, values, "id = ?", arrayOf(values.getAsString("id"))) == 1)
         }
     }
 
@@ -158,8 +176,14 @@ class CourseDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABAS
                 put(COL_TITLE, course.title)
                 put(COL_FOLDER_PATH, course.folderPath)
                 put(COL_DATE_ADDED, course.dateAdded)
+                put("source_type", course.sourceType.name)
+                put("remote_id", course.remoteId)
+                put("last_synced_at", course.lastSyncedAt)
             }
-            db.insertWithOnConflict(TABLE_COURSES, null, courseValues, SQLiteDatabase.CONFLICT_REPLACE)
+            upsert(db, TABLE_COURSES, courseValues)
+            if (course.sourceType == SourceType.YOUTUBE) {
+                db.execSQL("UPDATE lessons SET available = 0 WHERE course_id = ?", arrayOf(course.id))
+            }
 
             for (lesson in lessons) {
                 val lessonValues = ContentValues().apply {
@@ -172,8 +196,11 @@ class CourseDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABAS
                     put(COL_SUB_EN_PATH, lesson.subEnPath)
                     put(COL_AUDIO_AR_PATH, lesson.audioArPath)
                     put(COL_DURATION_MS, lesson.durationMs)
+                    put("source_type", lesson.sourceType.name)
+                    put("remote_id", lesson.remoteId)
+                    put("available", if (lesson.isAvailable) 1 else 0)
                 }
-                db.insertWithOnConflict(TABLE_LESSONS, null, lessonValues, SQLiteDatabase.CONFLICT_REPLACE)
+                upsert(db, TABLE_LESSONS, lessonValues)
             }
             db.setTransactionSuccessful()
         } finally {
@@ -189,7 +216,7 @@ class CourseDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABAS
         val query = """
             SELECT c.$COL_ID, c.$COL_TITLE, c.$COL_FOLDER_PATH, c.$COL_DATE_ADDED,
                    COUNT(l.$COL_ID) as total_lessons,
-                   SUM(CASE WHEN p.$COL_IS_COMPLETED = 1 THEN 1 ELSE 0 END) as completed_lessons
+                   SUM(CASE WHEN p.$COL_IS_COMPLETED = 1 THEN 1 ELSE 0 END) as completed_lessons, c.source_type, c.remote_id, c.last_synced_at
             FROM $TABLE_COURSES c
             LEFT JOIN $TABLE_LESSONS l ON c.$COL_ID = l.$COL_COURSE_ID
             LEFT JOIN $TABLE_PROGRESS p ON l.$COL_ID = p.$COL_LESSON_ID
@@ -214,7 +241,10 @@ class CourseDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABAS
                         folderPath = path,
                         dateAdded = date,
                         totalLessons = total,
-                        completedLessons = completed
+                        completedLessons = completed,
+                        sourceType = SourceType.valueOf(it.getString(6)),
+                        remoteId = it.getString(7),
+                        lastSyncedAt = it.getLong(8)
                     )
                 )
             }
@@ -231,7 +261,7 @@ class CourseDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABAS
                    l.$COL_VIDEO_PATH, l.$COL_SUB_AR_PATH, l.$COL_SUB_EN_PATH, l.$COL_AUDIO_AR_PATH, l.$COL_DURATION_MS,
                    COALESCE(p.$COL_IS_COMPLETED, 0) as is_completed,
                    COALESCE(p.$COL_LAST_POSITION_MS, 0) as last_position_ms,
-                   COALESCE(p.$COL_IS_BOOKMARKED, 0) as is_bookmarked
+                   COALESCE(p.$COL_IS_BOOKMARKED, 0) as is_bookmarked, l.source_type, l.remote_id, l.available
             FROM $TABLE_LESSONS l
             LEFT JOIN $TABLE_PROGRESS p ON l.$COL_ID = p.$COL_LESSON_ID
             WHERE l.$COL_COURSE_ID = ?
@@ -254,7 +284,10 @@ class CourseDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABAS
                         durationMs = it.getLong(8),
                         isCompleted = it.getInt(9) == 1,
                         lastPositionMs = it.getLong(10),
-                        isBookmarked = it.getInt(11) == 1
+                        isBookmarked = it.getInt(11) == 1,
+                        sourceType = SourceType.valueOf(it.getString(12)),
+                        remoteId = it.getString(13),
+                        isAvailable = it.getInt(14) == 1
                     )
                 )
             }
@@ -375,7 +408,7 @@ class CourseDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABAS
                    c.$COL_TITLE as course_title,
                    l.$COL_ORDER_INDEX, l.$COL_TITLE as lesson_title,
                    l.$COL_VIDEO_PATH, l.$COL_SUB_AR_PATH, l.$COL_SUB_EN_PATH, l.$COL_AUDIO_AR_PATH, l.$COL_DURATION_MS,
-                   p.$COL_IS_COMPLETED, p.$COL_IS_BOOKMARKED
+                   p.$COL_IS_COMPLETED, p.$COL_IS_BOOKMARKED, l.source_type, l.remote_id, l.available
             FROM $TABLE_PROGRESS p
             JOIN $TABLE_COURSES c ON p.$COL_COURSE_ID = c.$COL_ID
             JOIN $TABLE_LESSONS l ON p.$COL_LESSON_ID = l.$COL_ID
@@ -413,7 +446,10 @@ class CourseDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABAS
                     durationMs = dur,
                     isCompleted = isComp,
                     lastPositionMs = lastPos,
-                    isBookmarked = isBook
+                    isBookmarked = isBook,
+                    sourceType = SourceType.valueOf(it.getString(14)),
+                    remoteId = it.getString(15),
+                    isAvailable = it.getInt(16) == 1
                 )
 
                 return@withContext ResumeLessonInfo(
@@ -576,7 +612,7 @@ class CourseDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABAS
     suspend fun exportProgressJson(): String = withContext(Dispatchers.IO) {
         val db = readableDatabase
         val root = JSONObject()
-        root.put("version", 1)
+        root.put("version", 2)
         root.put("exportDate", System.currentTimeMillis())
 
         val progressArray = JSONArray()
@@ -619,21 +655,38 @@ class CourseDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABAS
             }
         }
         root.put("notes", notesArray)
-
+        root.put("youtubeCourses", JSONArray().apply {
+            getAllCourses().filter { it.sourceType == SourceType.YOUTUBE }.forEach { course ->
+                put(JSONObject().put("id", course.id).put("title", course.title).put("playlistId", course.remoteId)
+                    .put("dateAdded", course.dateAdded).put("lastSyncedAt", course.lastSyncedAt)
+                    .put("lessons", JSONArray().apply {
+                        getLessonsForCourse(course.id).forEach { lesson ->
+                            put(JSONObject().put("id", lesson.id).put("title", lesson.title).put("videoId", lesson.remoteId)
+                                .put("order", lesson.orderIndex).put("durationMs", lesson.durationMs).put("available", lesson.isAvailable))
+                        }
+                    }))
+            }
+        })
         root.toString(2)
     }
 
     suspend fun importProgressJson(jsonString: String): Boolean = withContext(Dispatchers.IO) {
         return@withContext try {
+            require(jsonString.length <= 10_000_000) { "Backup exceeds 10 MB" }
             val root = JSONObject(jsonString)
+            require(root.optInt("version", 1) in 1..2) { "Unsupported backup version" }
             val progressArray = root.optJSONArray("progress") ?: JSONArray()
             val notesArray = root.optJSONArray("notes") ?: JSONArray()
+            require(progressArray.length() <= 50000 && notesArray.length() <= 50000)
 
             val db = writableDatabase
             db.beginTransaction()
             try {
+                restoreYouTubeCourses(db, root.optJSONArray("youtubeCourses") ?: JSONArray())
                 for (i in 0 until progressArray.length()) {
                     val p = progressArray.getJSONObject(i)
+                    requireLessonOwner(db, p.getString("lessonId"), p.getString("courseId"))
+                    require(p.optLong("lastPositionMs", 0L) >= 0 && p.optLong("totalDurationMs", 0L) >= 0)
                     val values = ContentValues().apply {
                         put(COL_LESSON_ID, p.getString("lessonId"))
                         put(COL_COURSE_ID, p.getString("courseId"))
@@ -648,6 +701,8 @@ class CourseDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABAS
 
                 for (i in 0 until notesArray.length()) {
                     val n = notesArray.getJSONObject(i)
+                    requireLessonOwner(db, n.getString("lessonId"), n.getString("courseId"))
+                    require(n.getString("noteText").length <= 10000 && n.getLong("timestampMs") >= 0)
                     val values = ContentValues().apply {
                         put(COL_ID, n.getString("id"))
                         put(COL_LESSON_ID, n.getString("lessonId"))
@@ -668,6 +723,53 @@ class CourseDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABAS
         } catch (_: Exception) {
             false
         }
+    }
+
+    private fun requireLessonOwner(db: SQLiteDatabase, lessonId: String, courseId: String) {
+        db.rawQuery("SELECT 1 FROM lessons WHERE id = ? AND course_id = ?", arrayOf(lessonId, courseId)).use {
+            require(it.moveToFirst()) { "Import the original local course before restoring its notes/progress" }
+        }
+    }
+
+    private fun restoreYouTubeCourses(db: SQLiteDatabase, courses: JSONArray) {
+        require(courses.length() <= 1000)
+        for (i in 0 until courses.length()) {
+            val c = courses.getJSONObject(i); val playlist = c.getString("playlistId"); val id = c.getString("id")
+            require(playlist.matches(Regex("[A-Za-z0-9_-]{5,150}")) && id == "youtube:$playlist")
+            require(c.getString("title").length <= 1000)
+            val course = ContentValues().apply {
+                put("id", id); put("title", c.getString("title")); put("folder_path", "")
+                put("date_added", c.getLong("dateAdded")); put("source_type", "YOUTUBE"); put("remote_id", playlist)
+                put("last_synced_at", c.optLong("lastSyncedAt", 0L))
+            }
+            val incomingSync = c.optLong("lastSyncedAt", 0L)
+            val existingSync = db.rawQuery("SELECT last_synced_at FROM courses WHERE id = ?", arrayOf(id)).use { if (it.moveToFirst()) it.getLong(0) else -1L }
+            if (existingSync <= incomingSync) upsert(db, TABLE_COURSES, course)
+            val lessons = c.getJSONArray("lessons"); require(lessons.length() <= 10000)
+            for (j in 0 until lessons.length()) {
+                val l = lessons.getJSONObject(j); val lessonId = l.getString("id")
+                require(lessonId.startsWith("$id:") && lessonId.removePrefix("$id:").matches(Regex("[A-Za-z0-9_-]{1,200}")))
+                val video = l.optString("videoId").takeIf { it.matches(Regex("[A-Za-z0-9_-]{11}")) }
+                require(l.getString("title").length <= 1000 && l.getInt("order") >= 0 && l.optLong("durationMs", 0L) >= 0)
+                val values = ContentValues().apply {
+                    put("id", lessonId); put("course_id", id); put("order_index", l.getInt("order")); put("title", l.getString("title"))
+                    put("video_path", ""); put("duration_ms", l.optLong("durationMs", 0L)); put("source_type", "YOUTUBE")
+                    put("remote_id", video); put("available", if (video != null && l.optBoolean("available", true)) 1 else 0)
+                }
+                if (existingSync <= incomingSync) upsert(db, TABLE_LESSONS, values)
+                else db.insertWithOnConflict(TABLE_LESSONS, null, values, SQLiteDatabase.CONFLICT_IGNORE)
+            }
+        }
+    }
+
+    suspend fun expireRemoteMetadata() = withContext(Dispatchers.IO) {
+        val cutoff = System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000
+        writableDatabase.beginTransaction()
+        try {
+            writableDatabase.execSQL("UPDATE lessons SET title = 'YouTube lesson (refresh required)', available = 0, duration_ms = 0 WHERE course_id IN (SELECT id FROM courses WHERE source_type = 'YOUTUBE' AND last_synced_at < ?)", arrayOf(cutoff))
+            writableDatabase.execSQL("UPDATE courses SET title = 'YouTube course (refresh required)', last_synced_at = 0 WHERE source_type = 'YOUTUBE' AND last_synced_at < ?", arrayOf(cutoff))
+            writableDatabase.setTransactionSuccessful()
+        } finally { writableDatabase.endTransaction() }
     }
 
     suspend fun deleteCourse(courseId: String) = withContext(Dispatchers.IO) {

@@ -82,7 +82,9 @@ object AudioExtractorHelper {
                 bufferInfo.offset = 0
                 bufferInfo.size = sampleSize
                 bufferInfo.presentationTimeUs = extractor.sampleTime
-                bufferInfo.flags = extractor.sampleFlags
+                val flags = extractor.sampleFlags
+                require(flags and MediaExtractor.SAMPLE_FLAG_SYNC.inv() == 0) { "Encrypted or partial audio samples cannot be remuxed" }
+                bufferInfo.flags = if (flags and MediaExtractor.SAMPLE_FLAG_SYNC != 0) MediaCodec.BUFFER_FLAG_KEY_FRAME else 0
 
                 muxer.writeSampleData(muxerTrackIndex, buffer, bufferInfo)
                 extractor.advance()

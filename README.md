@@ -1,5 +1,7 @@
 # iLearn — منصة التعلّم الذاتي
 
+Online courses and AI tutor setup: [usage guide](tasks/usage.md). Implementation and verification status: [evidence report](tasks/evidence/implementation.md).
+
 [![Platform](https://img.shields.io/badge/Platform-Android%207.0%2B%20(API%2024%2B)-brightgreen.svg)](https://developer.android.com)
 [![Kotlin](https://img.shields.io/badge/Kotlin-1.9.24-purple.svg)](android/build.gradle.kts)
 
@@ -94,14 +96,14 @@ i_learn_app/
 
 1. افتح مجلد `android/` في Android Studio.
 2. اضبط Gradle JDK على JDK 17، وحدد مسار Android SDK محلياً عبر إعدادات البيئة أو ملف `android/local.properties`.
-3. لا يتضمن المشروع Gradle Wrapper؛ اضبط استخدام تثبيت Gradle 8.7 محلياً ثم نفّذ Gradle Sync. يحتاج تنزيل الاعتماديات لأول مرة إلى اتصال بالإنترنت.
+3. استخدم Gradle Wrapper المرفق (Gradle 8.12) مع JDK 17 ثم نفّذ Gradle Sync. يحتاج تنزيل الاعتماديات لأول مرة إلى اتصال بالإنترنت.
 4. اختر نسخة `debug` وشغّل التطبيق على جهاز أو محاكي يعمل بنظام Android 7.0 أو أحدث.
 
 يمكن أيضاً بناء نسخة التطوير من PowerShell إذا كان Gradle متاحاً في `PATH`:
 
 ```powershell
 Set-Location -LiteralPath '.\android'
-gradle :app:assembleDebug
+.\gradlew.bat :app:assembleDebug
 ```
 
 ينتج ملف التثبيت في:

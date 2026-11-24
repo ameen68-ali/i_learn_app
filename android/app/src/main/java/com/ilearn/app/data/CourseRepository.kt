@@ -42,7 +42,13 @@ class CourseRepository(private val context: Context) {
     }
 
     suspend fun refreshData() = withContext(Dispatchers.IO) {
-        _courses.value = dbHelper.getAllCourses()
+        var loaded = dbHelper.getAllCourses()
+        val cutoff = System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000
+        if (loaded.any { it.sourceType == SourceType.YOUTUBE && it.lastSyncedAt < cutoff && (it.lastSyncedAt != 0L || it.title != "YouTube course (refresh required)") }) {
+            dbHelper.expireRemoteMetadata()
+            loaded = dbHelper.getAllCourses()
+        }
+        _courses.value = loaded
         _resumeLesson.value = dbHelper.getResumeLesson()
         _stats.value = dbHelper.getStudyStats()
     }
@@ -157,9 +163,11 @@ class CourseRepository(private val context: Context) {
     }
 
     suspend fun deleteCourse(course: Course) = withContext(Dispatchers.IO) {
-        val folder = File(course.folderPath)
-        if (folder.exists()) {
-            folder.deleteRecursively()
+        if (course.sourceType == SourceType.LOCAL) {
+            val root = File(context.getExternalFilesDir(null), "courses").canonicalFile
+            val folder = File(course.folderPath).canonicalFile
+            require(folder != root && folder.path.startsWith(root.path + File.separator)) { "Invalid course storage path" }
+            if (folder.exists()) check(folder.deleteRecursively()) { "Unable to delete course files" }
         }
         dbHelper.deleteCourse(course.id)
     }

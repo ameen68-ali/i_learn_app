@@ -87,10 +87,12 @@ fun formatTimeMs(timeMs: Long): String {
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
 fun VideoPlayerScreen(
     lesson: Lesson,
     courseTitle: String,
+    onTutor: (Long) -> Unit,
     allLessons: List<Lesson>,
     notes: List<LessonNote>,
     playerController: ILearnPlayerController,
@@ -105,6 +107,7 @@ fun VideoPlayerScreen(
     onRemoveArabicAudio: suspend (Lesson) -> Boolean
 ) {
     val context = LocalContext.current
+    val playbackSession = remember(lesson.id) { com.ilearn.app.player.LocalPlaybackSession(playerController, lesson) }
     val activity = remember(context) { context.findActivity() }
     val configuration = LocalConfiguration.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -239,9 +242,9 @@ fun VideoPlayerScreen(
     LaunchedEffect(lesson.id, isPlaying) {
         while (true) {
             delay(1000L)
-            playerController.updateProgressState()
-            val pos = playerController.exoPlayer.currentPosition
-            val dur = playerController.exoPlayer.duration
+            playbackSession.sample()
+            val pos = playbackSession.state.value.positionMs
+            val dur = playbackSession.state.value.durationMs
             if (dur > 0 && pos > 0) {
                 onSaveProgress(lesson.id, lesson.courseId, pos, dur)
             }
@@ -251,9 +254,10 @@ fun VideoPlayerScreen(
     // Stop player when leaving screen or switching lessons
     DisposableEffect(lesson.id) {
         onDispose {
-            playerController.pause()
-            val pos = playerController.exoPlayer.currentPosition
-            val dur = playerController.exoPlayer.duration
+            playbackSession.sample()
+            playbackSession.pause()
+            val pos = playbackSession.state.value.positionMs
+            val dur = playbackSession.state.value.durationMs
             if (dur > 0) {
                 onSaveProgress(lesson.id, lesson.courseId, pos, dur)
             }
@@ -1104,6 +1108,11 @@ fun VideoPlayerScreen(
                                 }
                             }
 
+                            item {
+                                FilledTonalButton(onClick = { onTutor(currentPosition) }, modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+                                    Text("AI tutor • المعلّم")
+                                }
+                            }
                             // Study Notes Header & Add Box
                             item {
                                 StudyNotesSection(

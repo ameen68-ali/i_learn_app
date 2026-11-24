@@ -3,6 +3,7 @@
 /pipeline/
 
 # Android and Gradle build output
+/artifacts/
 .gradle/
 .kotlin/
 build/

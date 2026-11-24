@@ -3,13 +3,18 @@ package com.ilearn.app.data
 /**
  * Domain model representing a course imported from a .zip or .rar archive.
  */
+enum class SourceType { LOCAL, YOUTUBE }
+
 data class Course(
     val id: String,
     val title: String,
     val folderPath: String,
     val dateAdded: Long = System.currentTimeMillis(),
     val totalLessons: Int = 0,
-    val completedLessons: Int = 0
+    val completedLessons: Int = 0,
+    val sourceType: SourceType = SourceType.LOCAL,
+    val remoteId: String? = null,
+    val lastSyncedAt: Long = 0L
 ) {
     val progressPercentage: Int
         get() = if (totalLessons > 0) ((completedLessons * 100) / totalLessons).coerceIn(0, 100) else 0
@@ -41,7 +46,10 @@ data class Lesson(
     val durationMs: Long = 0L,
     val isCompleted: Boolean = false,
     val lastPositionMs: Long = 0L,
-    val isBookmarked: Boolean = false
+    val isBookmarked: Boolean = false,
+    val sourceType: SourceType = SourceType.LOCAL,
+    val remoteId: String? = null,
+    val isAvailable: Boolean = true
 ) {
     val hasArabicSubtitles: Boolean
         get() = !subArPath.isNullOrBlank()
