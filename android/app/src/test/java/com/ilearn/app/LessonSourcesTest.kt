@@ -1,6 +1,7 @@
 package com.ilearn.app
 
 import com.ilearn.app.youtube.PlaylistUrlParser
+import com.ilearn.app.youtube.YouTubeTranscriptClient
 import com.ilearn.app.tutor.TranscriptParser
 import org.junit.Assert.*
 import org.junit.Test
@@ -38,5 +39,53 @@ class LessonSourcesTest {
         val passages = TranscriptParser.parse("WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nFirst speaker\n\n00:00:01.000 --> 00:00:03.000\nSecond speaker\n\n", "vtt")
         assertTrue(passages.any { it.text.contains("First speaker") })
         assertTrue(passages.any { it.text.contains("Second speaker") })
+    }
+
+    @Test fun youtubeTranscriptParserConvertsJson3AndCleansRollingWebVtt() {
+        val key = YouTubeTranscriptClient.extractInnertubeApiKey("...\"INNERTUBE_API_KEY\":\"AIzaSyTestKey1234567890abcd\"...")
+        assertEquals("AIzaSyTestKey1234567890abcd", key)
+
+        val replaced = YouTubeTranscriptClient.setFormatParam("https://www.youtube.com/api/timedtext?v=abc&fmt=srv3", "json3")
+        assertEquals("https://www.youtube.com/api/timedtext?v=abc&fmt=json3", replaced)
+
+        val playerJson = """
+            {"captions":{"playerCaptionsTracklistRenderer":{"captionTracks":[
+              {"baseUrl":"https://www.youtube.com/api/timedtext?v=abc\u0026lang=en","languageCode":"en","kind":"asr","name":{"simpleText":"English (auto)"}},
+              {"baseUrl":"https://www.youtube.com/api/timedtext?v=abc\u0026lang=ar","languageCode":"ar","name":{"runs":[{"text":"العربية"}]}}
+            ]}}}
+        """.trimIndent()
+        val tracks = YouTubeTranscriptClient.parseCaptionTracks(playerJson)
+        assertEquals(2, tracks.size)
+        val preferred = YouTubeTranscriptClient.choosePreferredTrack(tracks, listOf("en", "ar"))
+        assertEquals("ar", preferred?.languageCode)
+
+        val json3 = """
+            {"events":[
+              {"tStartMs":1200,"dDurationMs":2500,"segs":[{"utf8":"Hello "},{"utf8":"world"}]},
+              {"tStartMs":3700,"dDurationMs":1200,"segs":[{"utf8":"\n"}]},
+              {"tStartMs":5000,"dDurationMs":2000,"segs":[{"utf8":"مرحبا بكم"}]}
+            ]}
+        """.trimIndent()
+        val vttFromJson3 = YouTubeTranscriptClient.json3ToVtt(json3)
+        val parsed = TranscriptParser.parse(vttFromJson3, "vtt")
+        assertEquals(1, parsed.size)
+        assertEquals(1200L, parsed.single().startMs)
+        assertTrue(parsed.single().text.contains("Hello world"))
+        assertTrue(parsed.single().text.contains("مرحبا بكم"))
+
+        val dirtyVtt = """
+            WEBVTT
+
+            00:00:01.000 --> 00:00:02.000 align:start
+            Hello<00:00:01.500><c> world</c>
+
+            00:00:02.000 --> 00:00:04.000 align:start
+            Hello world
+            Next sentence
+        """.trimIndent()
+        val cleaned = YouTubeTranscriptClient.cleanWebVtt(dirtyVtt)
+        val cleanedParsed = TranscriptParser.parse(cleaned, "vtt")
+        assertEquals(1, cleanedParsed.size)
+        assertEquals("Hello world\nNext sentence", cleanedParsed.single().text)
     }
 }

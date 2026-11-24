@@ -55,8 +55,9 @@ class TutorUiTest {
         profiles.save(ProviderProfile(name = "Fixture", format = ApiFormat.OPENAI_CHAT, endpoint = "https://example.test/v1", model = "fixture"), "fixture-only-key", false)
         val lesson = Lesson("ui-fixture-${UUID.randomUUID()}", "fixture-course", 1, "Fixture lesson", "")
         compose.setContent { ILearnTheme { TutorDialog(lesson, 0, profiles, {}, {}, {}) } }
-        compose.waitUntil(5000) { compose.onAllNodesWithText("Lesson content is unavailable. YouTube captions are not automatically accessible. Attach SRT/VTT/TXT to enable lesson answers.").fetchSemanticsNodes().isNotEmpty() }
+        compose.waitUntil(5000) { compose.onAllNodesWithText("Lesson transcript is unavailable. Attach SRT/VTT/TXT or enable general help.").fetchSemanticsNodes().isNotEmpty() }
+        assertTrue(compose.onAllNodesWithText("Bilingual").fetchSemanticsNodes().isEmpty())
         compose.onNodeWithText("Ask about this lesson…").performTextInput("Explain this lesson")
-        compose.onNodeWithText("Send").assertIsNotEnabled()
+        compose.onNodeWithContentDescription("Send").assertIsNotEnabled()
     }
 }

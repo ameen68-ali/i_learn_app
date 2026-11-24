@@ -120,7 +120,16 @@ fun CourseDetailScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
                     }
                 },
-                actions = { if (course.sourceType == com.ilearn.app.data.SourceType.YOUTUBE) TextButton(onClick = onRefresh) { Text("Refresh") } },
+                actions = {
+                    if (course.sourceType == com.ilearn.app.data.SourceType.YOUTUBE) {
+                        IconButton(
+                            onClick = onRefresh,
+                            modifier = Modifier.size(48.dp).semantics { contentDescription = "تحديث دروس يوتيوب" }
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface
                 )
@@ -261,7 +270,14 @@ fun CourseDetailScreen(
                         .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    LessonFilter.values().forEach { filter ->
+                    val visibleFilters = remember(course.sourceType, dubbedCount) {
+                        if (course.sourceType == com.ilearn.app.data.SourceType.YOUTUBE && dubbedCount == 0) {
+                            LessonFilter.values().filter { it != LessonFilter.DUBBED }
+                        } else {
+                            LessonFilter.values().toList()
+                        }
+                    }
+                    visibleFilters.forEach { filter ->
                         val count = when (filter) {
                             LessonFilter.ALL -> lessons.size
                             LessonFilter.UNWATCHED -> lessons.size - completedCount

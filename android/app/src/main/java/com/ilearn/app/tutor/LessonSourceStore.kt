@@ -21,6 +21,30 @@ class LessonSourceStore(private val context: Context) {
             File(path).takeIf { it.isFile && it.length() <= 1_000_000 }
         }.flatMap { TranscriptParser.parse(it.readText(), it.extension) }.distinctBy { it.id }
     }
+    fun sourceLabel(lesson: Lesson): String? {
+        val attached = file(lesson, "source.json")
+        read(attached)?.let { return JSONObject(it).optString("label").takeIf { l -> l.isNotBlank() } }
+        return when {
+            !lesson.subArPath.isNullOrBlank() && File(lesson.subArPath).isFile -> "Arabic subtitle"
+            !lesson.subEnPath.isNullOrBlank() && File(lesson.subEnPath).isFile -> "English subtitle"
+            else -> null
+        }
+    }
+    fun exportSource(lesson: Lesson): Pair<String, String>? {
+        val attached = file(lesson, "source.json")
+        read(attached)?.let { val json = JSONObject(it); return json.getString("extension") to json.getString("text") }
+        val localFile = listOfNotNull(lesson.subArPath, lesson.subEnPath).map { File(it) }.firstOrNull { it.isFile && it.length() <= 1_000_000 } ?: return null
+        return localFile.extension.ifBlank { "vtt" } to localFile.readText()
+    }
+    fun saveTranscript(lesson: Lesson, text: String, extension: String, label: String? = null) {
+        val ext = extension.lowercase()
+        require(ext in setOf("txt", "srt", "vtt")) { "Choose a TXT, SRT or VTT transcript" }
+        require(text.length <= 1_000_000) { "Transcript exceeds 1 MB" }
+        require(TranscriptParser.parse(text, ext).isNotEmpty()) { "No usable transcript passages found" }
+        val payload = JSONObject().put("extension", ext).put("text", text)
+        if (!label.isNullOrBlank()) payload.put("label", label)
+        write(file(lesson, "source.json"), payload.toString())
+    }
     fun attach(lesson: Lesson, uri: Uri) {
         val name = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { if (it.moveToFirst()) it.getString(0) else "" }.orEmpty()
         val ext = name.substringAfterLast('.', "").lowercase()
@@ -31,8 +55,7 @@ class LessonSourceStore(private val context: Context) {
             out.toByteArray()
         } ?: error("Cannot open transcript")
         val text = Charsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(bytes)).toString()
-        require(TranscriptParser.parse(text, ext).isNotEmpty()) { "No usable transcript passages found" }
-        write(file(lesson, "source.json"), JSONObject().put("extension", ext).put("text", text).toString())
+        saveTranscript(lesson, text, ext, name.ifBlank { "Attached ($ext)" })
     }
     private fun historyFile(lesson: Lesson, scope: String): File {
         val scopeHash = MessageDigest.getInstance("SHA-256").digest(scope.toByteArray()).joinToString("") { "%02x".format(it) }

@@ -241,8 +241,16 @@ fun CourseCatalogScreen(
                                     showAboutDialog = true
                                 }
                             )
-                            DropdownMenuItem(text = { Text("إضافة كورس من YouTube") }, onClick = { showMenu = false; onAddYouTube() })
-                            DropdownMenuItem(text = { Text("AI providers • إعدادات المعلّم") }, onClick = { showMenu = false; onApiSettings() })
+                            DropdownMenuItem(
+                                text = { Text("إضافة كورس من YouTube") },
+                                leadingIcon = { Icon(Icons.Default.OndemandVideo, contentDescription = null, tint = Color(0xFFEF4444)) },
+                                onClick = { showMenu = false; onAddYouTube() }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("المعلّم الذكي • إعدادات AI") },
+                                leadingIcon = { Icon(Icons.Default.SmartToy, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+                                onClick = { showMenu = false; onApiSettings() }
+                            )
                             HorizontalDivider()
                             DropdownMenuItem(
                                 text = { Text("تصدير نسخة احتياطية (JSON)") },
@@ -1018,17 +1026,29 @@ fun CourseCard(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                val isYouTubeCourse = course.sourceType == com.ilearn.app.data.SourceType.YOUTUBE
                 Box(
                     modifier = Modifier
                         .size(48.dp)
                         .clip(RoundedCornerShape(12.dp))
-                        .background(MaterialTheme.colorScheme.secondaryContainer),
+                        .background(
+                            if (isYouTubeCourse) Color(0xFFEF4444).copy(alpha = 0.14f)
+                            else MaterialTheme.colorScheme.secondaryContainer
+                        ),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = if (course.isCompleted) Icons.Default.CheckCircle else Icons.AutoMirrored.Filled.MenuBook,
+                        imageVector = when {
+                            course.isCompleted -> Icons.Default.CheckCircle
+                            isYouTubeCourse -> Icons.Default.OndemandVideo
+                            else -> Icons.AutoMirrored.Filled.MenuBook
+                        },
                         contentDescription = null,
-                        tint = if (course.isCompleted) Color(0xFF10B981) else MaterialTheme.colorScheme.secondary,
+                        tint = when {
+                            course.isCompleted -> Color(0xFF10B981)
+                            isYouTubeCourse -> Color(0xFFEF4444)
+                            else -> MaterialTheme.colorScheme.secondary
+                        },
                         modifier = Modifier.size(28.dp)
                     )
                 }
@@ -1045,7 +1065,7 @@ fun CourseCard(
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = "${course.totalLessons} درساً • ترجمة عربية وإنجليزية",
+                        text = if (isYouTubeCourse) "${course.totalLessons} درساً • YouTube" else "${course.totalLessons} درساً • ترجمة عربية وإنجليزية",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

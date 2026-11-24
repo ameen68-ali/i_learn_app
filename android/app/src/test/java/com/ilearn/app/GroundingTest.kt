@@ -26,4 +26,19 @@ class GroundingTest {
         val cues = listOf(SourcePassage("before", "Setup for the argument", 0, 10000), SourcePassage("definition", "Derivative definition", 60000, 70000), SourcePassage("after", "Its mathematical consequence", 120000, 130000))
         assertEquals(listOf("before", "definition", "after"), TranscriptParser.retrieve(cues, "derivative", 65000, 1000).map { it.id })
     }
+    @Test fun autoLanguageMatchesArabicAndNonArabicMessages() {
+        val arabicPrompt = TutorGrounding.promptForMessage("اشرح لي قاعدة السلسلة", emptyList(), false)
+        assertTrue(arabicPrompt.contains("Reply in Arabic"))
+        val englishPrompt = TutorGrounding.promptForMessage("Explain the chain rule", emptyList(), false)
+        assertTrue(englishPrompt.contains("exact same language as the student's latest message"))
+    }
+    @Test fun stripTagsReplacesValidCitationsWithTimestamps() {
+        val src = SourcePassage("abcdef123456-1", "Derivative rule", 65000, 70000)
+        val (tag, body) = TutorGrounding.stripTagsAndReplaceCitations("[Lesson evidence]\nSee [abcdef123456-1] here.", listOf(src)) { ms ->
+            val s = ms / 1000
+            String.format("%02d:%02d", s / 60, s % 60)
+        }
+        assertEquals("Lesson evidence", tag)
+        assertEquals("See [01:05] here.", body)
+    }
 }
