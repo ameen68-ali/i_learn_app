@@ -73,10 +73,15 @@ fun CourseDetailScreen(
     onTranslateLessonToArabic: (Lesson) -> Unit = {},
     onCancelTranslation: (String) -> Unit = {},
     onDismissTranslationError: (String) -> Unit = {},
-    onTranslateCourseToArabic: (List<Lesson>) -> Unit = {}
+    onTranslateCourseToArabic: (List<Lesson>) -> Unit = {},
+    dueFlashcardsCount: Int = 0,
+    onOpenDueFlashcards: () -> Unit = {},
+    onSearchTranscripts: suspend (String) -> List<com.ilearn.app.data.TranscriptSearchHit> = { emptyList() },
+    onOpenTranscriptHit: (Lesson, Long) -> Unit = { lesson, _ -> onSelectLesson(lesson) }
 ) {
     var selectedFilter by remember { mutableStateOf(LessonFilter.ALL) }
     var searchQuery by remember { mutableStateOf("") }
+    var transcriptHits by remember(course.id) { mutableStateOf<List<com.ilearn.app.data.TranscriptSearchHit>>(emptyList()) }
     var showCelebrationDialog by remember { mutableStateOf(false) }
     var hasAutoShownCelebration by remember { mutableStateOf(false) }
     var lessonToDeleteOffline by remember { mutableStateOf<Lesson?>(null) }
@@ -147,6 +152,16 @@ fun CourseDetailScreen(
         if (progressPct == 100 && lessons.isNotEmpty() && !hasAutoShownCelebration) {
             hasAutoShownCelebration = true
             showCelebrationDialog = true
+        }
+    }
+
+    LaunchedEffect(searchQuery, lessons) {
+        val q = searchQuery.trim()
+        if (q.length < 2) {
+            transcriptHits = emptyList()
+        } else {
+            kotlinx.coroutines.delay(180L)
+            transcriptHits = onSearchTranscripts(q)
         }
     }
 
@@ -305,6 +320,24 @@ fun CourseDetailScreen(
                     }
                 },
                 actions = {
+                    if (dueFlashcardsCount > 0) {
+                        IconButton(
+                            onClick = onOpenDueFlashcards,
+                            modifier = Modifier
+                                .size(48.dp)
+                                .semantics { contentDescription = "مراجعة البطاقات المستحقة ($dueFlashcardsCount)" }
+                        ) {
+                            BadgedBox(
+                                badge = {
+                                    Badge {
+                                        Text(dueFlashcardsCount.coerceAtMost(99).toString())
+                                    }
+                                }
+                            ) {
+                                Icon(Icons.Default.Quiz, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                    }
                     if (hasConfiguredAi && translatableLessons.isNotEmpty()) {
                         IconButton(
                             onClick = { showTranslateAllConfirm = true },
@@ -557,8 +590,72 @@ fun CourseDetailScreen(
                 )
             }
 
+            if (transcriptHits.isNotEmpty()) {
+                item {
+                    Text(
+                        text = "نتائج داخل نص الشرح (${transcriptHits.size})",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                items(
+                    items = transcriptHits,
+                    key = { "hit_${it.lesson.id}_${it.timestampMs}" }
+                ) { hit ->
+                    Card(
+                        onClick = { onOpenTranscriptHit(hit.lesson, hit.timestampMs) },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text(
+                                    text = formatTimeMs(hit.timestampMs),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "${hit.lesson.orderIndex}. ${hit.lesson.title}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = hit.snippet,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Icon(
+                                imageVector = Icons.Default.PlayArrow,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
+            }
+
             // Contextual Empty States (UXKIN 11 UI-States)
-            if (filteredLessons.isEmpty()) {
+            if (filteredLessons.isEmpty() && transcriptHits.isEmpty()) {
                 item {
                     if (searchQuery.isNotBlank()) {
                         ContextualEmptyState(

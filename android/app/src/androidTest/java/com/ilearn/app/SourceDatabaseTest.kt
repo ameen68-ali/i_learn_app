@@ -110,4 +110,51 @@ class SourceDatabaseTest {
         }
         helper.close()
     }
+
+    @Test fun studyPackAndFlashcardsPersistAcrossV4UpgradeAndReview() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        context.deleteDatabase("ilearn-study-test.db")
+        val db = context.openOrCreateDatabase("ilearn-study-test.db", 0, null)
+        db.execSQL("CREATE TABLE courses (id TEXT PRIMARY KEY, title TEXT NOT NULL, folder_path TEXT NOT NULL, date_added INTEGER NOT NULL, source_type TEXT NOT NULL DEFAULT 'LOCAL', remote_id TEXT, last_synced_at INTEGER NOT NULL DEFAULT 0)")
+        db.execSQL("CREATE TABLE lessons (id TEXT PRIMARY KEY, course_id TEXT NOT NULL, order_index INTEGER NOT NULL, title TEXT NOT NULL, video_path TEXT NOT NULL, sub_ar_path TEXT, sub_en_path TEXT, audio_ar_path TEXT, duration_ms INTEGER NOT NULL DEFAULT 0, is_available INTEGER NOT NULL DEFAULT 1)")
+        db.execSQL("CREATE TABLE progress (lesson_id TEXT PRIMARY KEY, course_id TEXT NOT NULL, is_completed INTEGER NOT NULL DEFAULT 0, last_position_ms INTEGER NOT NULL DEFAULT 0, total_duration_ms INTEGER NOT NULL DEFAULT 0, is_bookmarked INTEGER NOT NULL DEFAULT 0, last_watched_timestamp INTEGER NOT NULL DEFAULT 0)")
+        db.execSQL("CREATE TABLE notes (id TEXT PRIMARY KEY, lesson_id TEXT NOT NULL, course_id TEXT NOT NULL, timestamp_ms INTEGER NOT NULL, note_text TEXT NOT NULL, created_at INTEGER NOT NULL)")
+        db.execSQL("INSERT INTO courses VALUES ('c-study','Math','/owned/math',100,'LOCAL',NULL,0)")
+        db.execSQL("INSERT INTO lessons VALUES ('l-study','c-study',1,'Derivatives','/owned/math/01.mp4',NULL,NULL,NULL,10000,1)")
+        db.version = 4
+        db.close()
+
+        val helper = CourseDatabaseHelper(context, "ilearn-study-test.db")
+        val now = 1_700_000_000_000L
+        val pack = LessonStudyPack(
+            lessonId = "l-study",
+            courseId = "c-study",
+            summaryMarkdown = "## المشتقة\n- معدل التغير",
+            quizQuestions = listOf(QuizQuestion("ما المشتقة؟", listOf("ميل المماس", "المساحة"), 0, "تعريف المشتقة", 5000L)),
+            createdAt = now
+        )
+        val cards = listOf(
+            Flashcard("fc-1", "l-study", "c-study", "Derivative", "Rate of change", timestampMs = 5000L, dueAt = now - 1000L),
+            Flashcard("fc-2", "l-study", "c-study", "Integral", "Area under curve", timestampMs = 8000L, dueAt = now - 1000L)
+        )
+        helper.saveStudyPack(pack, cards)
+
+        val restoredPack = helper.getStudyPack("l-study")
+        assertNotNull(restoredPack)
+        assertEquals("## المشتقة\n- معدل التغير", restoredPack!!.summaryMarkdown)
+        assertEquals(1, restoredPack.quizQuestions.size)
+        assertEquals(2, helper.getDueFlashcardsCount("c-study", now))
+
+        helper.recordFlashcardReview("fc-1", quality = 3, nowMs = now)
+        assertEquals(1, helper.getDueFlashcardsCount("c-study", now))
+        val updatedCard = helper.getFlashcardsForLesson("l-study").first { it.id == "fc-1" }
+        assertEquals(1, updatedCard.repetitions)
+        assertEquals(1, updatedCard.intervalDays)
+
+        helper.deleteCourse("c-study")
+        assertNull(helper.getStudyPack("l-study"))
+        assertEquals(0, helper.getDueFlashcardsCount(null, now + 10_000_000_000L))
+        helper.close()
+        context.deleteDatabase("ilearn-study-test.db")
+    }
 }

@@ -22,13 +22,15 @@ class CourseDatabaseHelper(context: Context, databaseName: String = DATABASE_NAM
 
     companion object {
         private const val DATABASE_NAME = "ilearn.db"
-        private const val DATABASE_VERSION = 4
+        private const val DATABASE_VERSION = 5
 
         // Tables
         private const val TABLE_COURSES = "courses"
         private const val TABLE_LESSONS = "lessons"
         private const val TABLE_PROGRESS = "student_progress"
         private const val TABLE_NOTES = "lesson_notes"
+        private const val TABLE_STUDY_PACKS = "lesson_study_packs"
+        private const val TABLE_FLASHCARDS = "flashcards"
 
         // Common
         private const val COL_ID = "id"
@@ -117,6 +119,7 @@ class CourseDatabaseHelper(context: Context, databaseName: String = DATABASE_NAM
             )
         """)
         addSourceColumns(db)
+        createStudyPackTables(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -145,6 +148,38 @@ class CourseDatabaseHelper(context: Context, databaseName: String = DATABASE_NAM
                 db.execSQL("ALTER TABLE $TABLE_LESSONS ADD COLUMN $COL_AUDIO_AR_PATH TEXT")
             } catch (_: Exception) {}
         }
+
+        if (oldVersion < 5) {
+            createStudyPackTables(db)
+        }
+    }
+
+    private fun createStudyPackTables(db: SQLiteDatabase) {
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS $TABLE_STUDY_PACKS (
+                $COL_LESSON_ID TEXT PRIMARY KEY,
+                $COL_COURSE_ID TEXT NOT NULL,
+                summary_markdown TEXT NOT NULL,
+                quiz_json TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                FOREIGN KEY ($COL_LESSON_ID) REFERENCES $TABLE_LESSONS($COL_ID) ON DELETE CASCADE
+            )
+        """)
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS $TABLE_FLASHCARDS (
+                $COL_ID TEXT PRIMARY KEY,
+                $COL_LESSON_ID TEXT NOT NULL,
+                $COL_COURSE_ID TEXT NOT NULL,
+                front TEXT NOT NULL,
+                back TEXT NOT NULL,
+                timestamp_ms INTEGER,
+                repetitions INTEGER NOT NULL DEFAULT 0,
+                interval_days INTEGER NOT NULL DEFAULT 0,
+                ease_factor REAL NOT NULL DEFAULT 2.5,
+                due_at INTEGER NOT NULL,
+                FOREIGN KEY ($COL_LESSON_ID) REFERENCES $TABLE_LESSONS($COL_ID) ON DELETE CASCADE
+            )
+        """)
     }
 
     private fun addSourceColumns(db: SQLiteDatabase) {
@@ -845,10 +880,133 @@ class CourseDatabaseHelper(context: Context, databaseName: String = DATABASE_NAM
         } finally { writableDatabase.endTransaction() }
     }
 
+    // --- Study Packs & Spaced-Repetition Flashcards (SQLite v5) ---
+    suspend fun saveStudyPack(
+        pack: LessonStudyPack,
+        flashcards: List<Flashcard>
+    ) = withContext(Dispatchers.IO) {
+        val db = writableDatabase
+        val quizJson = com.ilearn.app.tutor.StudyPackGenerator.serializeQuizJson(pack.quizQuestions)
+        db.beginTransaction()
+        try {
+            val packValues = ContentValues().apply {
+                put(COL_LESSON_ID, pack.lessonId)
+                put(COL_COURSE_ID, pack.courseId)
+                put("summary_markdown", pack.summaryMarkdown)
+                put("quiz_json", quizJson)
+                put("created_at", pack.createdAt)
+            }
+            db.insertWithOnConflict(TABLE_STUDY_PACKS, null, packValues, SQLiteDatabase.CONFLICT_REPLACE)
+
+            db.delete(TABLE_FLASHCARDS, "$COL_LESSON_ID = ?", arrayOf(pack.lessonId))
+            flashcards.forEach { card ->
+                val cardValues = ContentValues().apply {
+                    put(COL_ID, card.id)
+                    put(COL_LESSON_ID, card.lessonId)
+                    put(COL_COURSE_ID, card.courseId)
+                    put("front", card.front)
+                    put("back", card.back)
+                    if (card.timestampMs != null) put("timestamp_ms", card.timestampMs) else putNull("timestamp_ms")
+                    put("repetitions", card.repetitions)
+                    put("interval_days", card.intervalDays)
+                    put("ease_factor", card.easeFactor)
+                    put("due_at", card.dueAt)
+                }
+                db.insertWithOnConflict(TABLE_FLASHCARDS, null, cardValues, SQLiteDatabase.CONFLICT_REPLACE)
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        notifyChanged()
+    }
+
+    suspend fun getStudyPack(lessonId: String): LessonStudyPack? = withContext(Dispatchers.IO) {
+        val db = readableDatabase
+        db.rawQuery(
+            "SELECT $COL_LESSON_ID, $COL_COURSE_ID, summary_markdown, quiz_json, created_at FROM $TABLE_STUDY_PACKS WHERE $COL_LESSON_ID = ?",
+            arrayOf(lessonId)
+        ).use { cursor ->
+            if (!cursor.moveToFirst()) return@withContext null
+            LessonStudyPack(
+                lessonId = cursor.getString(0),
+                courseId = cursor.getString(1),
+                summaryMarkdown = cursor.getString(2),
+                quizQuestions = com.ilearn.app.tutor.StudyPackGenerator.parseQuizJson(cursor.getString(3)),
+                createdAt = cursor.getLong(4)
+            )
+        }
+    }
+
+    suspend fun getFlashcardsForLesson(lessonId: String): List<Flashcard> = withContext(Dispatchers.IO) {
+        queryFlashcards("SELECT $COL_ID, $COL_LESSON_ID, $COL_COURSE_ID, front, back, timestamp_ms, repetitions, interval_days, ease_factor, due_at FROM $TABLE_FLASHCARDS WHERE $COL_LESSON_ID = ? ORDER BY due_at ASC", arrayOf(lessonId))
+    }
+
+    suspend fun getDueFlashcards(courseId: String? = null, nowMs: Long = System.currentTimeMillis()): List<Flashcard> = withContext(Dispatchers.IO) {
+        val sql = if (courseId != null) {
+            "SELECT $COL_ID, $COL_LESSON_ID, $COL_COURSE_ID, front, back, timestamp_ms, repetitions, interval_days, ease_factor, due_at FROM $TABLE_FLASHCARDS WHERE $COL_COURSE_ID = ? AND due_at <= ? ORDER BY due_at ASC"
+        } else {
+            "SELECT $COL_ID, $COL_LESSON_ID, $COL_COURSE_ID, front, back, timestamp_ms, repetitions, interval_days, ease_factor, due_at FROM $TABLE_FLASHCARDS WHERE due_at <= ? ORDER BY due_at ASC"
+        }
+        val args = if (courseId != null) arrayOf(courseId, nowMs.toString()) else arrayOf(nowMs.toString())
+        queryFlashcards(sql, args)
+    }
+
+    suspend fun getDueFlashcardsCount(courseId: String? = null, nowMs: Long = System.currentTimeMillis()): Int = withContext(Dispatchers.IO) {
+        val sql = if (courseId != null) {
+            "SELECT COUNT(*) FROM $TABLE_FLASHCARDS WHERE $COL_COURSE_ID = ? AND due_at <= ?"
+        } else {
+            "SELECT COUNT(*) FROM $TABLE_FLASHCARDS WHERE due_at <= ?"
+        }
+        val args = if (courseId != null) arrayOf(courseId, nowMs.toString()) else arrayOf(nowMs.toString())
+        readableDatabase.rawQuery(sql, args).use { if (it.moveToFirst()) it.getInt(0) else 0 }
+    }
+
+    suspend fun recordFlashcardReview(cardId: String, quality: Int, nowMs: Long = System.currentTimeMillis()) = withContext(Dispatchers.IO) {
+        val existing = queryFlashcards(
+            "SELECT $COL_ID, $COL_LESSON_ID, $COL_COURSE_ID, front, back, timestamp_ms, repetitions, interval_days, ease_factor, due_at FROM $TABLE_FLASHCARDS WHERE $COL_ID = ?",
+            arrayOf(cardId)
+        ).firstOrNull() ?: return@withContext
+        val updated = com.ilearn.app.tutor.SpacedRepetition.review(existing, quality, nowMs)
+        val values = ContentValues().apply {
+            put("repetitions", updated.repetitions)
+            put("interval_days", updated.intervalDays)
+            put("ease_factor", updated.easeFactor)
+            put("due_at", updated.dueAt)
+        }
+        writableDatabase.update(TABLE_FLASHCARDS, values, "$COL_ID = ?", arrayOf(cardId))
+        notifyChanged()
+    }
+
+    private fun queryFlashcards(sql: String, args: Array<String>): List<Flashcard> {
+        val list = mutableListOf<Flashcard>()
+        readableDatabase.rawQuery(sql, args).use { cursor ->
+            while (cursor.moveToNext()) {
+                list.add(
+                    Flashcard(
+                        id = cursor.getString(0),
+                        lessonId = cursor.getString(1),
+                        courseId = cursor.getString(2),
+                        front = cursor.getString(3),
+                        back = cursor.getString(4),
+                        timestampMs = if (cursor.isNull(5)) null else cursor.getLong(5),
+                        repetitions = cursor.getInt(6),
+                        intervalDays = cursor.getInt(7),
+                        easeFactor = cursor.getDouble(8),
+                        dueAt = cursor.getLong(9)
+                    )
+                )
+            }
+        }
+        return list
+    }
+
     suspend fun deleteCourse(courseId: String) = withContext(Dispatchers.IO) {
         val db = writableDatabase
         db.beginTransaction()
         try {
+            db.delete(TABLE_FLASHCARDS, "$COL_COURSE_ID = ?", arrayOf(courseId))
+            db.delete(TABLE_STUDY_PACKS, "$COL_COURSE_ID = ?", arrayOf(courseId))
             db.delete(TABLE_NOTES, "$COL_COURSE_ID = ?", arrayOf(courseId))
             db.delete(TABLE_PROGRESS, "$COL_COURSE_ID = ?", arrayOf(courseId))
             db.delete(TABLE_LESSONS, "$COL_COURSE_ID = ?", arrayOf(courseId))

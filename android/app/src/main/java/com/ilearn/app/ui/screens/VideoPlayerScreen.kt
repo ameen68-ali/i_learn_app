@@ -111,7 +111,10 @@ fun VideoPlayerScreen(
     translationError: String? = null,
     onTranslateSubtitlesToArabic: () -> Unit = {},
     onCancelTranslation: () -> Unit = {},
-    onDismissTranslationError: () -> Unit = {}
+    onDismissTranslationError: () -> Unit = {},
+    initialSeekMs: Long = -1L,
+    onStudyPack: () -> Unit = {},
+    onSnapFrameTutor: (Long, String) -> Unit = { _, _ -> }
 ) {
     val context = LocalContext.current
     val playbackSession = remember(lesson.id) { com.ilearn.app.player.LocalPlaybackSession(playerController, lesson) }
@@ -131,6 +134,7 @@ fun VideoPlayerScreen(
 
     val subtitleMode by playerController.subtitleMode.collectAsState()
     val subtitleSize by playerController.subtitleSize.collectAsState()
+    val dualSubtitles by playerController.dualSubtitles.collectAsState()
     val audioTrackMode by playerController.audioTrackMode.collectAsState()
     val playbackSpeed by playerController.playbackSpeed.collectAsState()
     val isPlaying by playerController.isPlaying.collectAsState()
@@ -144,6 +148,9 @@ fun VideoPlayerScreen(
     var showNotesDialog by remember { mutableStateOf(false) }
     var showAudioDialog by remember { mutableStateOf(false) }
     var showAttachAudioBottomSheet by remember { mutableStateOf(false) }
+    var showTranscriptSheet by remember { mutableStateOf(false) }
+    var isCapturingFrame by remember { mutableStateOf(false) }
+    var consumedInitialSeek by remember(lesson.id, initialSeekMs) { mutableStateOf(false) }
     var showGestureTutorial by rememberSaveable { mutableStateOf(true) }
     var areControlsVisible by remember { mutableStateOf(true) }
     var isExtractingAudio by remember { mutableStateOf(false) }
@@ -191,6 +198,28 @@ fun VideoPlayerScreen(
                 AudioExtractorHelper.shareAudioFile(context, file, lesson.title)
             } else {
                 snackbarHostState.showSnackbar("تعذّر استخراج الصوت من ملف الفيديو")
+            }
+        }
+    }
+
+    // Handler for paused-frame AI Vision capture
+    val captureFrameAndAsk: () -> Unit = {
+        if (!isCapturingFrame) {
+            val capturePos = currentPosition
+            playerController.pause()
+            coroutineScope.launch {
+                isCapturingFrame = true
+                val base64 = com.ilearn.app.player.VideoFrameCapture.captureFrameBase64(
+                    context = context,
+                    videoPath = lesson.videoPath,
+                    positionMs = capturePos
+                )
+                isCapturingFrame = false
+                if (base64 != null) {
+                    onSnapFrameTutor(capturePos, base64)
+                } else {
+                    snackbarHostState.showSnackbar("تعذّر التقاط لقطة من الفيديو في هذه اللحظة")
+                }
             }
         }
     }
@@ -255,21 +284,34 @@ fun VideoPlayerScreen(
         if (sameLessonReload && lesson.hasArabicSubtitles) {
             playerController.setSubtitleMode(SubtitleMode.ARABIC)
         }
+        val overridePos = when {
+            sameLessonReload -> currentPosition
+            initialSeekMs > 0L && !consumedInitialSeek -> {
+                consumedInitialSeek = true
+                initialSeekMs
+            }
+            else -> null
+        }
         playerController.loadLesson(
             lesson = lesson,
-            overridePositionMs = if (sameLessonReload) currentPosition else null
+            overridePositionMs = overridePos
         )
     }
 
-    // Periodic progress saver
-    LaunchedEffect(lesson.id, isPlaying) {
+    // Periodic progress saver (250ms tick in Dual Subtitle mode for crisp AR+EN sync)
+    LaunchedEffect(lesson.id, isPlaying, subtitleMode) {
+        var ticks = 0
+        val tickDelay = if (subtitleMode == SubtitleMode.DUAL) 250L else 1000L
         while (true) {
-            delay(1000L)
+            delay(tickDelay)
             playbackSession.sample()
-            val pos = playbackSession.state.value.positionMs
-            val dur = playbackSession.state.value.durationMs
-            if (dur > 0 && pos > 0) {
-                onSaveProgress(lesson.id, lesson.courseId, pos, dur)
+            ticks++
+            if (tickDelay >= 1000L || ticks % 4 == 0) {
+                val pos = playbackSession.state.value.positionMs
+                val dur = playbackSession.state.value.durationMs
+                if (dur > 0 && pos > 0) {
+                    onSaveProgress(lesson.id, lesson.courseId, pos, dur)
+                }
             }
         }
     }
@@ -444,6 +486,16 @@ fun VideoPlayerScreen(
                         modifier = Modifier.fillMaxSize()
                     )
 
+                    if (subtitleMode == SubtitleMode.DUAL && dualSubtitles != null) {
+                        DualSubtitleOverlay(
+                            dual = dualSubtitles!!,
+                            subtitleSize = subtitleSize,
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .padding(horizontal = 32.dp, vertical = 22.dp)
+                        )
+                    }
+
                     // Seek Ripple Indicators
                     seekRippleSide?.let { side ->
                         Box(
@@ -528,7 +580,10 @@ fun VideoPlayerScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f)
+                                ) {
                                     IconButton(
                                         onClick = handleBackPress,
                                         modifier = Modifier
@@ -560,6 +615,54 @@ fun VideoPlayerScreen(
                                 }
 
                                 Row(verticalAlignment = Alignment.CenterVertically) {
+                                    // Interactive Transcript Sheet
+                                    IconButton(
+                                        onClick = { showTranscriptSheet = true },
+                                        modifier = Modifier
+                                            .size(44.dp)
+                                            .semantics { contentDescription = "النص التفاعلي للدرس" }
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Article,
+                                            contentDescription = null,
+                                            tint = Color.White
+                                        )
+                                    }
+                                    // Smart Study Pack (Summary + Quiz + Flashcards)
+                                    IconButton(
+                                        onClick = onStudyPack,
+                                        modifier = Modifier
+                                            .size(44.dp)
+                                            .semantics { contentDescription = "حزمة الدراسة الذكية" }
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.AutoAwesome,
+                                            contentDescription = null,
+                                            tint = Color(0xFF38BDF8)
+                                        )
+                                    }
+                                    // Paused-Frame AI Vision Explainer
+                                    IconButton(
+                                        onClick = captureFrameAndAsk,
+                                        enabled = !isCapturingFrame,
+                                        modifier = Modifier
+                                            .size(44.dp)
+                                            .semantics { contentDescription = "اشرح اللقطة الحالية بالذكاء الاصطناعي" }
+                                    ) {
+                                        if (isCapturingFrame) {
+                                            CircularProgressIndicator(
+                                                color = Color(0xFF38BDF8),
+                                                strokeWidth = 2.dp,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        } else {
+                                            Icon(
+                                                imageVector = Icons.Default.PhotoCamera,
+                                                contentDescription = null,
+                                                tint = Color.White
+                                            )
+                                        }
+                                    }
                                     // Audio Track & Dubbing Button 🎙️
                                     IconButton(
                                         onClick = { showAudioDialog = true },
@@ -956,6 +1059,16 @@ fun VideoPlayerScreen(
                             modifier = Modifier.fillMaxSize()
                         )
 
+                        if (subtitleMode == SubtitleMode.DUAL && dualSubtitles != null) {
+                            DualSubtitleOverlay(
+                                dual = dualSubtitles!!,
+                                subtitleSize = subtitleSize,
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                            )
+                        }
+
                         if (playerError != null) {
                             Box(
                                 modifier = Modifier
@@ -1155,6 +1268,81 @@ fun VideoPlayerScreen(
                                         )
                                     ) {
                                         Icon(Icons.Default.SkipNext, contentDescription = null)
+                                    }
+                                }
+                            }
+
+                            // Compact Study & AI Vision Icon Bar (Transcript / Study Pack / Frame Vision)
+                            item {
+                                Surface(
+                                    color = Color(0xFF0F172A),
+                                    shape = RoundedCornerShape(14.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                                        horizontalArrangement = Arrangement.SpaceEvenly,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                            IconButton(
+                                                onClick = { showTranscriptSheet = true },
+                                                modifier = Modifier
+                                                    .size(48.dp)
+                                                    .semantics { contentDescription = "النص التفاعلي للدرس" }
+                                            ) {
+                                                Icon(Icons.Default.Article, contentDescription = null, tint = Color.White)
+                                            }
+                                            Text(
+                                                text = "النص التفاعلي",
+                                                color = Color(0xFFE2E8F0),
+                                                fontSize = 11.sp
+                                            )
+                                        }
+
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                            IconButton(
+                                                onClick = onStudyPack,
+                                                modifier = Modifier
+                                                    .size(48.dp)
+                                                    .semantics { contentDescription = "حزمة الدراسة الذكية" }
+                                            ) {
+                                                Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = Color(0xFF38BDF8))
+                                            }
+                                            Text(
+                                                text = "ملخص واختبار",
+                                                color = Color(0xFF38BDF8),
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        }
+
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                            IconButton(
+                                                onClick = captureFrameAndAsk,
+                                                enabled = !isCapturingFrame,
+                                                modifier = Modifier
+                                                    .size(48.dp)
+                                                    .semantics { contentDescription = "اشرح اللقطة الحالية بالذكاء الاصطناعي" }
+                                            ) {
+                                                if (isCapturingFrame) {
+                                                    CircularProgressIndicator(
+                                                        color = Color(0xFF38BDF8),
+                                                        strokeWidth = 2.dp,
+                                                        modifier = Modifier.size(20.dp)
+                                                    )
+                                                } else {
+                                                    Icon(Icons.Default.PhotoCamera, contentDescription = null, tint = Color.White)
+                                                }
+                                            }
+                                            Text(
+                                                text = "اشرح اللقطة",
+                                                color = Color(0xFFE2E8F0),
+                                                fontSize = 11.sp
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -1725,6 +1913,62 @@ fun VideoPlayerScreen(
                 isVisible = showGestureTutorial,
                 onDismiss = { showGestureTutorial = false }
             )
+
+            if (showTranscriptSheet) {
+                com.ilearn.app.ui.components.TranscriptSheet(
+                    lesson = lesson,
+                    currentPositionMs = currentPosition,
+                    onSeek = {
+                        showTranscriptSheet = false
+                        playerController.seekTo(it)
+                    },
+                    onDismiss = { showTranscriptSheet = false }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DualSubtitleOverlay(
+    dual: Pair<String?, String?>,
+    subtitleSize: SubtitleSize,
+    modifier: Modifier = Modifier
+) {
+    val ar = dual.first?.takeIf { it.isNotBlank() }
+    val en = dual.second?.takeIf { it.isNotBlank() }
+    if (ar == null && en == null) return
+
+    Surface(
+        color = Color(0xDE0F172A),
+        shape = RoundedCornerShape(10.dp),
+        modifier = modifier.widthIn(max = 540.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            if (ar != null) {
+                Text(
+                    text = ar,
+                    color = Color.White,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = (14f * subtitleSize.scale).sp,
+                    lineHeight = (19f * subtitleSize.scale).sp,
+                    textAlign = TextAlign.Center
+                )
+            }
+            if (en != null) {
+                Text(
+                    text = en,
+                    color = Color(0xFF7DD3FC),
+                    fontWeight = FontWeight.Medium,
+                    fontSize = (12.5f * subtitleSize.scale).sp,
+                    lineHeight = (17f * subtitleSize.scale).sp,
+                    textAlign = TextAlign.Center
+                )
+            }
         }
     }
 }

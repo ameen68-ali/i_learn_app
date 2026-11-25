@@ -57,7 +57,9 @@ fun CourseCatalogScreen(
     onGetStorageInfo: suspend () -> Pair<Long, Long>,
     onClearCache: suspend () -> Unit,
     onAddYouTube: () -> Unit,
-    onApiSettings: () -> Unit
+    onApiSettings: () -> Unit,
+    dueFlashcardsCount: Int = 0,
+    onOpenDueFlashcards: () -> Unit = {}
 ) {
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -209,6 +211,24 @@ fun CourseCatalogScreen(
                     }
                 },
                 actions = {
+                    if (dueFlashcardsCount > 0) {
+                        IconButton(
+                            onClick = onOpenDueFlashcards,
+                            modifier = Modifier
+                                .size(44.dp)
+                                .semantics { contentDescription = "مراجعة البطاقات المستحقة ($dueFlashcardsCount)" }
+                        ) {
+                            BadgedBox(
+                                badge = {
+                                    Badge {
+                                        Text(dueFlashcardsCount.coerceAtMost(99).toString())
+                                    }
+                                }
+                            ) {
+                                Icon(Icons.Default.Quiz, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                    }
                     FilledTonalIconButton(
                         onClick = { showCourseImportSheet = true },
                         modifier = Modifier

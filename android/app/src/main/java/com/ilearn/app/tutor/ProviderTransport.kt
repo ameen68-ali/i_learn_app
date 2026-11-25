@@ -9,7 +9,7 @@ import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 import com.ilearn.app.net.requireApiKey
 
-data class TutorMessage(val role: String, val text: String)
+data class TutorMessage(val role: String, val text: String, val imageBase64: String? = null)
 data class TutorReply(val text: String, val usage: String = "")
 
 private fun JSONObject?.optNonNullString(key: String): String {
@@ -18,31 +18,86 @@ private fun JSONObject?.optNonNullString(key: String): String {
 }
 
 object ProviderCodec {
+    private fun encodeChatOrAnthropicMessage(format: ApiFormat, m: TutorMessage): JSONObject {
+        val obj = JSONObject().put("role", m.role)
+        val img = m.imageBase64?.takeIf { it.isNotBlank() }
+        if (img == null) {
+            return obj.put("content", m.text)
+        }
+        val parts = JSONArray()
+        if (format == ApiFormat.ANTHROPIC) {
+            parts.put(
+                JSONObject().put("type", "image").put(
+                    "source",
+                    JSONObject().put("type", "base64").put("media_type", "image/jpeg").put("data", img)
+                )
+            )
+            parts.put(JSONObject().put("type", "text").put("text", m.text))
+        } else {
+            parts.put(JSONObject().put("type", "text").put("text", m.text))
+            parts.put(
+                JSONObject().put("type", "image_url").put(
+                    "image_url",
+                    JSONObject().put("url", "data:image/jpeg;base64,$img")
+                )
+            )
+        }
+        return obj.put("content", parts)
+    }
+
+    private fun encodeResponsesMessage(m: TutorMessage): JSONObject {
+        val obj = JSONObject().put("role", m.role)
+        val img = m.imageBase64?.takeIf { it.isNotBlank() }
+        if (img == null) {
+            return obj.put("content", m.text)
+        }
+        val parts = JSONArray()
+            .put(JSONObject().put("type", "input_text").put("text", m.text))
+            .put(JSONObject().put("type", "input_image").put("image_url", "data:image/jpeg;base64,$img"))
+        return obj.put("content", parts)
+    }
+
+    private fun encodeGeminiMessage(m: TutorMessage): JSONObject {
+        val parts = JSONArray()
+        m.imageBase64?.takeIf { it.isNotBlank() }?.let { img ->
+            parts.put(
+                JSONObject().put(
+                    "inlineData",
+                    JSONObject().put("mimeType", "image/jpeg").put("data", img)
+                )
+            )
+        }
+        parts.put(JSONObject().put("text", m.text))
+        return JSONObject()
+            .put("role", if (m.role == "assistant") "model" else "user")
+            .put("parts", parts)
+    }
+
     fun request(p: ProviderProfile, system: String, messages: List<TutorMessage>): Pair<String, JSONObject> {
         p.validate()
         val body = JSONObject().put("model", p.model)
         val path = when (p.format) {
             ApiFormat.OPENAI_CHAT -> {
                 body.put("messages", JSONArray().put(JSONObject().put("role", "system").put("content", system)).apply {
-                    messages.forEach { put(JSONObject().put("role", it.role).put("content", it.text)) }
+                    messages.forEach { put(encodeChatOrAnthropicMessage(ApiFormat.OPENAI_CHAT, it)) }
                 }).put(if (p.modernChatTokens) "max_completion_tokens" else "max_tokens", p.maxOutputTokens).put("stream", p.stream)
                 if (p.stream && java.net.URI(p.endpoint).host == "api.openai.com") body.put("stream_options", JSONObject().put("include_usage", true))
                 "chat/completions"
             }
             ApiFormat.OPENAI_RESPONSES -> {
-                body.put("instructions", system).put("input", JSONArray().apply { messages.forEach { put(JSONObject().put("role", it.role).put("content", it.text)) } })
+                body.put("instructions", system).put("input", JSONArray().apply { messages.forEach { put(encodeResponsesMessage(it)) } })
                     .put("max_output_tokens", p.maxOutputTokens).put("stream", p.stream).put("store", false)
                 "responses"
             }
             ApiFormat.ANTHROPIC -> {
-                body.put("system", system).put("messages", JSONArray().apply { messages.forEach { put(JSONObject().put("role", it.role).put("content", it.text)) } })
+                body.put("system", system).put("messages", JSONArray().apply { messages.forEach { put(encodeChatOrAnthropicMessage(ApiFormat.ANTHROPIC, it)) } })
                     .put("max_tokens", p.maxOutputTokens).put("stream", p.stream)
                 "messages"
             }
             ApiFormat.GEMINI -> {
                 body.remove("model")
                 body.put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
-                    .put("contents", JSONArray().apply { messages.forEach { put(JSONObject().put("role", if (it.role == "assistant") "model" else "user").put("parts", JSONArray().put(JSONObject().put("text", it.text)))) } })
+                    .put("contents", JSONArray().apply { messages.forEach { put(encodeGeminiMessage(it)) } })
                     .put("generationConfig", JSONObject().put("maxOutputTokens", p.maxOutputTokens))
                 "models/${p.model.removePrefix("models/")}:${if (p.stream) "streamGenerateContent?alt=sse" else "generateContent"}"
             }

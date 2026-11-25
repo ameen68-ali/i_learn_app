@@ -128,3 +128,38 @@ data class BackupPayload(
     val progress: List<BackupProgressEntry>,
     val notes: List<LessonNote>
 )
+
+data class QuizQuestion(
+    val question: String,
+    val options: List<String>,
+    val correctIndex: Int,
+    val explanation: String,
+    val timestampMs: Long? = null
+)
+
+data class LessonStudyPack(
+    val lessonId: String,
+    val courseId: String,
+    val summaryMarkdown: String,
+    val quizQuestions: List<QuizQuestion>,
+    val createdAt: Long = System.currentTimeMillis()
+)
+
+data class Flashcard(
+    val id: String,
+    val lessonId: String,
+    val courseId: String,
+    val front: String,
+    val back: String,
+    val timestampMs: Long? = null,
+    val repetitions: Int = 0,
+    val intervalDays: Int = 0,
+    val easeFactor: Double = 2.5,
+    val dueAt: Long = System.currentTimeMillis()
+)
+
+data class TranscriptSearchHit(
+    val lesson: Lesson,
+    val snippet: String,
+    val timestampMs: Long
+)

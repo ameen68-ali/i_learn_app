@@ -18,6 +18,8 @@ import androidx.media3.exoplayer.source.MergingMediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import com.ilearn.app.data.AudioTrackMode
 import com.ilearn.app.data.Lesson
+import com.ilearn.app.tutor.SubtitleLine
+import com.ilearn.app.tutor.TranscriptParser
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -26,6 +28,7 @@ import java.io.File
 enum class SubtitleMode(val labelAr: String, val labelEn: String, val langCode: String?) {
     ARABIC("🇸🇦 العربية", "Arabic", "ar"),
     ENGLISH("🇬🇧 English", "English", "en"),
+    DUAL("🇸🇦 + 🇬🇧 معاً", "Dual (AR + EN)", "dual"),
     OFF("🚫 بدون ترجمة", "Off", null)
 }
 
@@ -70,6 +73,9 @@ class ILearnPlayerController(private val context: Context) {
     private val _currentSubtitles = MutableStateFlow<String?>(null)
     val currentSubtitles: StateFlow<String?> = _currentSubtitles.asStateFlow()
 
+    private val _dualSubtitles = MutableStateFlow<Pair<String?, String?>?>(null)
+    val dualSubtitles: StateFlow<Pair<String?, String?>?> = _dualSubtitles.asStateFlow()
+
     private val _isBuffering = MutableStateFlow(false)
     val isBuffering: StateFlow<Boolean> = _isBuffering.asStateFlow()
 
@@ -77,6 +83,8 @@ class ILearnPlayerController(private val context: Context) {
     val playerError: StateFlow<String?> = _playerError.asStateFlow()
 
     private var activeLesson: Lesson? = null
+    private var arCueLines: List<SubtitleLine> = emptyList()
+    private var enCueLines: List<SubtitleLine> = emptyList()
     val activeLessonId: String? get() = activeLesson?.id
 
     init {
@@ -107,7 +115,7 @@ class ILearnPlayerController(private val context: Context) {
             }
 
             override fun onCues(cueGroup: CueGroup) {
-                if (_subtitleMode.value == SubtitleMode.OFF) {
+                if (_subtitleMode.value == SubtitleMode.OFF || _subtitleMode.value == SubtitleMode.DUAL) {
                     _currentSubtitles.value = null
                 } else {
                     val text = cueGroup.cues.joinToString("\n") { it.text?.toString() ?: "" }.trim()
@@ -150,6 +158,9 @@ class ILearnPlayerController(private val context: Context) {
     fun loadLesson(lesson: Lesson, overridePositionMs: Long? = null) {
         activeLesson = lesson
         _currentSubtitles.value = null
+        _dualSubtitles.value = null
+        arCueLines = emptyList()
+        enCueLines = emptyList()
         _playerError.value = null
         _isBuffering.value = true
 
@@ -171,6 +182,7 @@ class ILearnPlayerController(private val context: Context) {
             ?: findSubtitleFile(videoFile, "subtitles_ar")
 
         arSubFile?.let { file ->
+            arCueLines = runCatching { TranscriptParser.parseLines(file.readText(), file.extension) }.getOrDefault(emptyList())
             val mimeType = if (file.name.endsWith(".srt", ignoreCase = true)) {
                 MimeTypes.APPLICATION_SUBRIP
             } else {
@@ -191,6 +203,7 @@ class ILearnPlayerController(private val context: Context) {
             ?: findSubtitleFile(videoFile, "subtitles_en")
 
         enSubFile?.let { file ->
+            enCueLines = runCatching { TranscriptParser.parseLines(file.readText(), file.extension) }.getOrDefault(emptyList())
             val mimeType = if (file.name.endsWith(".srt", ignoreCase = true)) {
                 MimeTypes.APPLICATION_SUBRIP
             } else {
@@ -246,14 +259,16 @@ class ILearnPlayerController(private val context: Context) {
         if (targetPositionMs > 0L) {
             exoPlayer.seekTo(targetPositionMs)
         }
+        refreshDualSubtitles(targetPositionMs)
     }
 
     fun setSubtitleMode(mode: SubtitleMode) {
         _subtitleMode.value = mode
-        if (mode == SubtitleMode.OFF) {
+        if (mode == SubtitleMode.OFF || mode == SubtitleMode.DUAL) {
             _currentSubtitles.value = null
         }
         applySubtitleMode(mode)
+        refreshDualSubtitles(exoPlayer.currentPosition)
     }
 
     fun setSubtitleSize(size: SubtitleSize) {
@@ -263,7 +278,7 @@ class ILearnPlayerController(private val context: Context) {
 
     private fun applySubtitleMode(mode: SubtitleMode) {
         val paramsBuilder = exoPlayer.trackSelectionParameters.buildUpon()
-        if (mode == SubtitleMode.OFF || mode.langCode == null) {
+        if (mode == SubtitleMode.OFF || mode == SubtitleMode.DUAL || mode.langCode == null) {
             paramsBuilder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
             paramsBuilder.clearOverridesOfType(C.TRACK_TYPE_TEXT)
         } else {
@@ -321,17 +336,24 @@ class ILearnPlayerController(private val context: Context) {
     }
 
     fun seekForward(ms: Long = 10000L) {
-        val target = (exoPlayer.currentPosition + ms).coerceAtMost(exoPlayer.duration)
+        val target = (exoPlayer.currentPosition + ms).coerceAtMost(exoPlayer.duration.coerceAtLeast(0L))
         exoPlayer.seekTo(target)
+        _currentPosition.value = target
+        refreshDualSubtitles(target)
     }
 
     fun seekBackward(ms: Long = 10000L) {
         val target = (exoPlayer.currentPosition - ms).coerceAtLeast(0L)
         exoPlayer.seekTo(target)
+        _currentPosition.value = target
+        refreshDualSubtitles(target)
     }
 
     fun seekTo(positionMs: Long) {
-        exoPlayer.seekTo(positionMs.coerceIn(0L, exoPlayer.duration.coerceAtLeast(0L)))
+        val target = positionMs.coerceIn(0L, exoPlayer.duration.coerceAtLeast(0L))
+        exoPlayer.seekTo(target)
+        _currentPosition.value = target
+        refreshDualSubtitles(target)
     }
 
     fun pause() {
@@ -353,10 +375,24 @@ class ILearnPlayerController(private val context: Context) {
     }
 
     fun updateProgressState() {
-        _currentPosition.value = exoPlayer.currentPosition
+        val pos = exoPlayer.currentPosition
+        _currentPosition.value = pos
         if (exoPlayer.duration > 0) {
             _duration.value = exoPlayer.duration
         }
+        refreshDualSubtitles(pos)
+    }
+
+    private fun refreshDualSubtitles(positionMs: Long) {
+        if (_subtitleMode.value != SubtitleMode.DUAL) {
+            if (_dualSubtitles.value != null) {
+                _dualSubtitles.value = null
+            }
+            return
+        }
+        val ar = TranscriptParser.findActiveLine(arCueLines, positionMs)?.text
+        val en = TranscriptParser.findActiveLine(enCueLines, positionMs)?.text
+        _dualSubtitles.value = if (ar != null || en != null) ar to en else null
     }
 
     fun release() {

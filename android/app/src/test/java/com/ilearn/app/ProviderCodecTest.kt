@@ -49,4 +49,29 @@ class ProviderCodecTest {
         assertNotNull(failure)
         assertFalse(failure!!.message.orEmpty().contains("fixture-private-value"))
     }
+
+    @Test fun multimodalMessagesEncodeImagesAcrossAllApiFormats() {
+        val sampleB64 = "ZmFrZS1qcGVn"
+        val msg = TutorMessage("user", "Explain this matrix", imageBase64 = sampleB64)
+
+        val (_, chatBody) = ProviderCodec.request(profile(ApiFormat.OPENAI_CHAT), "Sys", listOf(msg))
+        val chatParts = chatBody.getJSONArray("messages").getJSONObject(1).getJSONArray("content")
+        assertEquals("image_url", chatParts.getJSONObject(1).getString("type"))
+        assertTrue(chatParts.getJSONObject(1).getJSONObject("image_url").getString("url").contains(sampleB64))
+
+        val (_, respBody) = ProviderCodec.request(profile(ApiFormat.OPENAI_RESPONSES), "Sys", listOf(msg))
+        val respParts = respBody.getJSONArray("input").getJSONObject(0).getJSONArray("content")
+        assertEquals("input_image", respParts.getJSONObject(1).getString("type"))
+        assertTrue(respParts.getJSONObject(1).getString("image_url").contains(sampleB64))
+
+        val (_, antBody) = ProviderCodec.request(profile(ApiFormat.ANTHROPIC), "Sys", listOf(msg))
+        val antParts = antBody.getJSONArray("messages").getJSONObject(0).getJSONArray("content")
+        assertEquals("image", antParts.getJSONObject(0).getString("type"))
+        assertEquals(sampleB64, antParts.getJSONObject(0).getJSONObject("source").getString("data"))
+
+        val (_, gemBody) = ProviderCodec.request(profile(ApiFormat.GEMINI), "Sys", listOf(msg))
+        val gemParts = gemBody.getJSONArray("contents").getJSONObject(0).getJSONArray("parts")
+        assertEquals(sampleB64, gemParts.getJSONObject(0).getJSONObject("inlineData").getString("data"))
+        assertEquals("image/jpeg", gemParts.getJSONObject(0).getJSONObject("inlineData").getString("mimeType"))
+    }
 }

@@ -8,6 +8,8 @@ import com.ilearn.app.importer.ImportState
 import com.ilearn.app.tutor.ArabicSubtitleTranslator
 import com.ilearn.app.tutor.LessonSourceStore
 import com.ilearn.app.tutor.ProviderProfileStore
+import com.ilearn.app.tutor.StudyPackGenerator
+import com.ilearn.app.tutor.TranscriptParser
 import com.ilearn.app.utils.AudioExtractorHelper
 import com.ilearn.app.youtube.LessonDownloadState
 import com.ilearn.app.youtube.YouTubeOfflineDownloader
@@ -340,6 +342,120 @@ class CourseRepository(
             subEnPath = enFileToSave?.absolutePath ?: lesson.subEnPath
         )
         sourceStore.removeSource(lesson)
+    }
+
+    suspend fun getStudyPack(lessonId: String): LessonStudyPack? =
+        dbHelper.getStudyPack(lessonId)
+
+    suspend fun getFlashcardsForLesson(lessonId: String): List<Flashcard> =
+        dbHelper.getFlashcardsForLesson(lessonId)
+
+    suspend fun getDueFlashcards(
+        courseId: String? = null,
+        nowMs: Long = System.currentTimeMillis()
+    ): List<Flashcard> = dbHelper.getDueFlashcards(courseId, nowMs)
+
+    suspend fun getDueFlashcardsCount(
+        courseId: String? = null,
+        nowMs: Long = System.currentTimeMillis()
+    ): Int = dbHelper.getDueFlashcardsCount(courseId, nowMs)
+
+    suspend fun reviewFlashcard(
+        cardId: String,
+        quality: Int,
+        nowMs: Long = System.currentTimeMillis()
+    ) = dbHelper.recordFlashcardReview(cardId, quality, nowMs)
+
+    suspend fun generateAndSaveStudyPack(lesson: Lesson): Result<LessonStudyPack> = withContext(Dispatchers.IO) {
+        try {
+            val profile = providerProfiles.active()
+                ?: return@withContext Result.failure(IllegalStateException("أضف مزوّد ذكاء اصطناعي من الإعدادات أولاً"))
+            val apiKey = providerProfiles.key(profile).orEmpty()
+            if (apiKey.isBlank()) {
+                return@withContext Result.failure(IllegalStateException("أدخل مفتاح API للمزوّد النشط من الإعدادات أولاً"))
+            }
+            val (pack, flashcards) = StudyPackGenerator.generate(
+                context = context,
+                lesson = lesson,
+                profile = profile,
+                apiKey = apiKey
+            )
+            dbHelper.saveStudyPack(pack, flashcards)
+            Result.success(pack)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun searchCourseTranscripts(
+        lessons: List<Lesson>,
+        query: String,
+        maxHitsPerLesson: Int = 2,
+        maxTotalHits: Int = 30
+    ): List<TranscriptSearchHit> = withContext(Dispatchers.IO) {
+        val trimmed = query.trim()
+        if (trimmed.length < 2) return@withContext emptyList()
+        val sourceStore = LessonSourceStore(context)
+        val hits = mutableListOf<TranscriptSearchHit>()
+
+        for (lesson in lessons) {
+            if (hits.size >= maxTotalHits) break
+            val candidateFiles = listOfNotNull(
+                lesson.subArPath?.let(::File)?.takeIf { it.isFile },
+                lesson.subEnPath?.let(::File)?.takeIf { it.isFile }
+            )
+            var foundForLesson = 0
+
+            for (file in candidateFiles) {
+                if (foundForLesson >= maxHitsPerLesson || hits.size >= maxTotalHits) break
+                val lines = runCatching {
+                    TranscriptParser.parseLines(file.readText(), file.extension)
+                }.getOrDefault(emptyList())
+                for (line in lines) {
+                    if (line.text.contains(trimmed, ignoreCase = true)) {
+                        val isDuplicateTs = hits.any {
+                            it.lesson.id == lesson.id && kotlin.math.abs(it.timestampMs - line.startMs) < 2500L
+                        }
+                        if (!isDuplicateTs) {
+                            hits.add(
+                                TranscriptSearchHit(
+                                    lesson = lesson,
+                                    snippet = line.text.replace('\n', ' ').trim().take(120),
+                                    timestampMs = line.startMs
+                                )
+                            )
+                            foundForLesson++
+                            if (foundForLesson >= maxHitsPerLesson || hits.size >= maxTotalHits) break
+                        }
+                    }
+                }
+            }
+
+            if (foundForLesson == 0 && hits.size < maxTotalHits) {
+                val exported = sourceStore.exportSource(lesson)
+                if (exported != null) {
+                    val (ext, text) = exported
+                    val passages = runCatching { TranscriptParser.parse(text, ext) }.getOrDefault(emptyList())
+                    for (p in passages) {
+                        val ts = p.startMs ?: 0L
+                        if (p.text.contains(trimmed, ignoreCase = true)) {
+                            hits.add(
+                                TranscriptSearchHit(
+                                    lesson = lesson,
+                                    snippet = p.text.replace('\n', ' ').trim().take(120),
+                                    timestampMs = ts
+                                )
+                            )
+                            foundForLesson++
+                            if (foundForLesson >= maxHitsPerLesson || hits.size >= maxTotalHits) break
+                        }
+                    }
+                }
+            }
+        }
+        hits
     }
 
     suspend fun deleteCourse(course: Course) = withContext(Dispatchers.IO) {

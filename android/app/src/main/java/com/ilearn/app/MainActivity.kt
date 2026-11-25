@@ -28,6 +28,8 @@ import com.ilearn.app.data.LessonNote
 import com.ilearn.app.player.ILearnPlayerController
 import com.ilearn.app.ui.screens.CourseCatalogScreen
 import com.ilearn.app.ui.screens.CourseDetailScreen
+import com.ilearn.app.ui.screens.DueFlashcardsReviewDialog
+import com.ilearn.app.ui.screens.StudyPackDialog
 import com.ilearn.app.ui.screens.VideoPlayerScreen
 import com.ilearn.app.ui.theme.ILearnTheme
 import kotlinx.coroutines.Dispatchers
@@ -70,6 +72,26 @@ class MainActivity : ComponentActivity() {
                         val translationErrors by repository.translationErrors.collectAsState()
                         val providerUpdates by providerProfiles.updates.collectAsState()
                         val hasConfiguredAi = remember(providerUpdates) { repository.hasConfiguredAi() }
+                        var dueFlashcardsCount by remember { mutableIntStateOf(0) }
+                        var showGlobalDueReview by remember { mutableStateOf(false) }
+
+                        LaunchedEffect(dbUpdates) {
+                            dueFlashcardsCount = repository.getDueFlashcardsCount()
+                        }
+
+                        if (showGlobalDueReview) {
+                            DueFlashcardsReviewDialog(
+                                title = "مراجعة البطاقات المستحقة",
+                                onLoadDueCards = { repository.getDueFlashcards() },
+                                onReviewFlashcard = { cardId, quality ->
+                                    repository.reviewFlashcard(cardId, quality)
+                                },
+                                onJumpToLessonTimestamp = { lid, cid, ts ->
+                                    navController.navigate("player/$cid/$lid?seekMs=$ts")
+                                },
+                                onClose = { showGlobalDueReview = false }
+                            )
+                        }
 
                         NavHost(navController = navController, startDestination = "catalog") {
                             // 1. Home / Course Catalog Screen (Zero preloaded, direct view, stats & backup)
@@ -79,6 +101,8 @@ class MainActivity : ComponentActivity() {
                                     resumeLesson = resumeLesson,
                                     stats = stats,
                                     importState = importState,
+                                    dueFlashcardsCount = dueFlashcardsCount,
+                                    onOpenDueFlashcards = { showGlobalDueReview = true },
                                     onSelectCourse = { course ->
                                         navController.navigate("course_detail/${course.id}")
                                     },
@@ -142,9 +166,26 @@ class MainActivity : ComponentActivity() {
                                 val currentCourse = courses.firstOrNull { it.id == courseId }
 
                                 var lessons by remember { mutableStateOf<List<Lesson>>(emptyList()) }
+                                var courseDueCount by remember(courseId) { mutableIntStateOf(0) }
+                                var showCourseDueReview by remember(courseId) { mutableStateOf(false) }
 
                                 LaunchedEffect(courseId, courses, dbUpdates) {
                                     lessons = repository.getLessonsForCourse(courseId)
+                                    courseDueCount = repository.getDueFlashcardsCount(courseId)
+                                }
+
+                                if (showCourseDueReview && currentCourse != null) {
+                                    DueFlashcardsReviewDialog(
+                                        title = "بطاقات: ${currentCourse.title}",
+                                        onLoadDueCards = { repository.getDueFlashcards(courseId) },
+                                        onReviewFlashcard = { cardId, quality ->
+                                            repository.reviewFlashcard(cardId, quality)
+                                        },
+                                        onJumpToLessonTimestamp = { lid, cid, ts ->
+                                            navController.navigate("player/$cid/$lid?seekMs=$ts")
+                                        },
+                                        onClose = { showCourseDueReview = false }
+                                    )
                                 }
 
                                 if (currentCourse != null) {
@@ -153,6 +194,12 @@ class MainActivity : ComponentActivity() {
                                         lessons = lessons,
                                         lessonDownloads = lessonDownloads,
                                         lessonDownloadErrors = lessonDownloadErrors,
+                                        dueFlashcardsCount = courseDueCount,
+                                        onOpenDueFlashcards = { showCourseDueReview = true },
+                                        onSearchTranscripts = { q -> repository.searchCourseTranscripts(lessons, q) },
+                                        onOpenTranscriptHit = { lesson, ts ->
+                                            navController.navigate("player/${currentCourse.id}/${lesson.id}?seekMs=$ts")
+                                        },
                                         onRefresh = { currentCourse.remoteId?.let { navController.navigate("youtube_import?playlist=$it") } },
                                         onBack = {
                                             playerController.pause()
@@ -212,14 +259,16 @@ class MainActivity : ComponentActivity() {
 
                             // 3. Video Player Screen with Subtitles, Gestures, Audio Tracks & Dubbing
                             composable(
-                                route = "player/{courseId}/{lessonId}",
+                                route = "player/{courseId}/{lessonId}?seekMs={seekMs}",
                                 arguments = listOf(
                                     navArgument("courseId") { type = NavType.StringType },
-                                    navArgument("lessonId") { type = NavType.StringType }
+                                    navArgument("lessonId") { type = NavType.StringType },
+                                    navArgument("seekMs") { type = NavType.LongType; defaultValue = -1L }
                                 )
                             ) { backStackEntry ->
                                 val courseId = backStackEntry.arguments?.getString("courseId") ?: ""
                                 val lessonId = backStackEntry.arguments?.getString("lessonId") ?: ""
+                                val initialSeekMs = backStackEntry.arguments?.getLong("seekMs") ?: -1L
 
                                 val currentCourse = courses.firstOrNull { it.id == courseId }
                                 var allLessons by remember { mutableStateOf<List<Lesson>>(emptyList()) }
@@ -234,6 +283,9 @@ class MainActivity : ComponentActivity() {
 
                                 activeLesson?.let { lesson ->
                                     var tutorPosition by remember(lesson.id) { mutableStateOf<Long?>(null) }
+                                    var tutorFrameBase64 by remember(lesson.id) { mutableStateOf<String?>(null) }
+                                    var showStudyPack by remember(lesson.id) { mutableStateOf(false) }
+                                    var youtubeSeekTrigger by remember(lesson.id) { mutableStateOf<Pair<Long, Long>?>(null) }
                                     val useOfflinePlayer = lesson.sourceType == SourceType.LOCAL || lesson.hasOfflineVideo
                                     LaunchedEffect(lesson.id, useOfflinePlayer) {
                                         if (!useOfflinePlayer) playerController.pause()
@@ -251,8 +303,11 @@ class MainActivity : ComponentActivity() {
                                             onTranslateToArabic = { repository.startLessonArabicTranslation(lesson) },
                                             onCancelTranslation = { repository.cancelTranslation(lesson.id) },
                                             onDismissTranslationError = { repository.dismissTranslationError(lesson.id) },
+                                            initialSeekMs = initialSeekMs,
+                                            externalSeekRequest = youtubeSeekTrigger,
+                                            onStudyPack = { showStudyPack = true },
                                             onBack = { navController.popBackStack() },
-                                            onNavigate = { target -> navController.navigate("player/${target.courseId}/${target.id}") { popUpTo("player/{courseId}/{lessonId}") { inclusive = true } } },
+                                            onNavigate = { target -> navController.navigate("player/${target.courseId}/${target.id}") { popUpTo("player/{courseId}/{lessonId}?seekMs={seekMs}") { inclusive = true } } },
                                             onProgress = { pos, dur -> lifecycleScope.launch { repository.updateLessonProgress(lesson.id, lesson.courseId, pos, dur) } },
                                             onBookmark = { marked -> lifecycleScope.launch {
                                                 repository.toggleBookmark(lesson.id, lesson.courseId, marked)
@@ -266,7 +321,7 @@ class MainActivity : ComponentActivity() {
                                     } else VideoPlayerScreen(
                                         lesson = lesson,
                                         courseTitle = currentCourse?.title ?: "iLearn",
-                                        onTutor = { position -> playerController.pause(); tutorPosition = position },
+                                        onTutor = { position -> playerController.pause(); tutorFrameBase64 = null; tutorPosition = position },
                                         allLessons = allLessons,
                                         notes = notes,
                                         playerController = playerController,
@@ -276,7 +331,7 @@ class MainActivity : ComponentActivity() {
                                         },
                                         onNavigateLesson = { targetLesson ->
                                             navController.navigate("player/${targetLesson.courseId}/${targetLesson.id}") {
-                                                popUpTo("player/{courseId}/{lessonId}") { inclusive = true }
+                                                popUpTo("player/{courseId}/{lessonId}?seekMs={seekMs}") { inclusive = true }
                                             }
                                         },
                                         onSaveProgress = { targetLessonId, targetCourseId, pos, dur ->
@@ -334,7 +389,14 @@ class MainActivity : ComponentActivity() {
                                         translationError = translationErrors[lesson.id],
                                         onTranslateSubtitlesToArabic = { repository.startLessonArabicTranslation(lesson) },
                                         onCancelTranslation = { repository.cancelTranslation(lesson.id) },
-                                        onDismissTranslationError = { repository.dismissTranslationError(lesson.id) }
+                                        onDismissTranslationError = { repository.dismissTranslationError(lesson.id) },
+                                        initialSeekMs = initialSeekMs,
+                                        onStudyPack = { playerController.pause(); showStudyPack = true },
+                                        onSnapFrameTutor = { position, frameBase64 ->
+                                            playerController.pause()
+                                            tutorFrameBase64 = frameBase64
+                                            tutorPosition = position
+                                        }
                                     )
                                     tutorPosition?.let { position ->
                                         TutorDialog(
@@ -348,9 +410,35 @@ class MainActivity : ComponentActivity() {
                                             } else null,
                                             onCancelTranslation = { repository.cancelTranslation(lesson.id) },
                                             onDismissTranslationError = { repository.dismissTranslationError(lesson.id) },
-                                            onSeek = { playerController.seekTo(it); tutorPosition = null },
+                                            initialFrameBase64 = tutorFrameBase64,
+                                            initialFramePositionMs = position,
+                                            onSeek = { playerController.seekTo(it); tutorPosition = null; tutorFrameBase64 = null },
                                             onSettings = { navController.navigate("api_settings") },
-                                            onClose = { tutorPosition = null }
+                                            onClose = { tutorPosition = null; tutorFrameBase64 = null }
+                                        )
+                                    }
+                                    if (showStudyPack) {
+                                        StudyPackDialog(
+                                            lesson = lesson,
+                                            hasConfiguredAi = hasConfiguredAi,
+                                            onLoadCachedPack = {
+                                                repository.getStudyPack(lesson.id) to repository.getFlashcardsForLesson(lesson.id)
+                                            },
+                                            onGeneratePack = { repository.generateAndSaveStudyPack(lesson) },
+                                            onLoadLessonFlashcards = { repository.getFlashcardsForLesson(lesson.id) },
+                                            onReviewFlashcard = { cardId, quality ->
+                                                repository.reviewFlashcard(cardId, quality)
+                                            },
+                                            onSeek = { ts ->
+                                                showStudyPack = false
+                                                if (useOfflinePlayer) {
+                                                    playerController.seekTo(ts)
+                                                } else {
+                                                    youtubeSeekTrigger = ts to System.nanoTime()
+                                                }
+                                            },
+                                            onOpenSettings = { showStudyPack = false; navController.navigate("api_settings") },
+                                            onClose = { showStudyPack = false }
                                         )
                                     }
                                 }

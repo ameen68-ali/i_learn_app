@@ -67,7 +67,9 @@ fun TutorDialog(
     translationError: String? = null,
     onTranslateToArabic: (() -> Unit)? = null,
     onCancelTranslation: () -> Unit = {},
-    onDismissTranslationError: () -> Unit = {}
+    onDismissTranslationError: () -> Unit = {},
+    initialFrameBase64: String? = null,
+    initialFramePositionMs: Long? = null
 ) {
     val context = LocalContext.current
     val sourceStore = remember(context) { LessonSourceStore(context) }
@@ -82,6 +84,8 @@ fun TutorDialog(
     var messages by remember(lesson.id, profile?.id) { mutableStateOf<List<TutorMessage>>(emptyList()) }
     var question by remember(lesson.id) { mutableStateOf("") }
     var general by remember(lesson.id) { mutableStateOf(false) }
+    var attachedFrameBase64 by remember(lesson.id, initialFrameBase64) { mutableStateOf(initialFrameBase64) }
+    var attachedFrameTimeMs by remember(lesson.id, initialFramePositionMs) { mutableStateOf(initialFramePositionMs ?: positionMs) }
     var answer by remember(lesson.id, profile?.id) { mutableStateOf("") }
     var status by remember(lesson.id) { mutableStateOf("") }
     var infoBanner by remember(lesson.id) { mutableStateOf("") }
@@ -230,6 +234,8 @@ fun TutorDialog(
         val q = (overrideQuestion ?: question).trim()
         if (q.isEmpty()) return
         val requestScope = historyScope
+        val frameForRequest = attachedFrameBase64
+        val frameTimeForRequest = attachedFrameTimeMs
         busy = true
         work = scope.launch {
             status = ""
@@ -237,7 +243,7 @@ fun TutorDialog(
             usage = ""
             try {
                 val key = profiles.key(p) ?: error("أدخل مفتاح API في إعدادات المزوّد • Enter your API key in AI settings")
-                require(general || sources.isNotEmpty()) {
+                require(general || sources.isNotEmpty() || frameForRequest != null) {
                     "نص الدرس غير متوفر. حمّل نص يوتيوب أو أرفق ملف ترجمة أو فعّل المساعدة العامة."
                 }
                 val snapshot = sources.toList()
@@ -245,31 +251,50 @@ fun TutorDialog(
                     .takeIf { it.sumOf { m -> m.text.length } < p.contextChars / 3 } ?: emptyList()
                 val budget = p.contextChars - q.length - history.sumOf { it.text.length } - 3000
                 require(budget >= 500) { "السؤال أو سجل المحادثة يتجاوز حد الأحرف المسموح في الإعدادات." }
-                val selected = if (general) emptyList() else TranscriptParser.retrieve(snapshot, q, positionMs, budget)
-                require(general || selected.isNotEmpty()) { "حجم المقاطع أكبر من حد الإدخال. ارفع الحد في إعدادات المزوّد." }
-                val prompt = TutorGrounding.promptForMessage(q, selected, general)
+                val allowVisionWithoutTranscript = !general && snapshot.isEmpty() && frameForRequest != null
+                val selected = if (general || allowVisionWithoutTranscript) {
+                    emptyList()
+                } else {
+                    TranscriptParser.retrieve(snapshot, q, positionMs, budget)
+                }
+                require(general || allowVisionWithoutTranscript || selected.isNotEmpty()) {
+                    "حجم المقاطع أكبر من حد الإدخال. ارفع الحد في إعدادات المزوّد."
+                }
+                val prompt = if (allowVisionWithoutTranscript) {
+                    "You are an expert tutor examining a paused video frame captured at ${formatTimeMs(frameTimeForRequest)} from lesson '${lesson.title}'. Explain clearly whatever equations, diagrams, slides, code, or text appear in the frame, replying in the exact language of the student's question."
+                } else {
+                    TutorGrounding.promptForMessage(q, selected, general)
+                }
                 require(prompt.length + q.length + history.sumOf { it.text.length } <= p.contextChars) {
                     "حد الأحرف صغير جداً؛ قم بزيادته من الإعدادات."
                 }
-                val reply = ProviderTransport().generate(p, key, prompt, history + TutorMessage("user", q)) { partial ->
+                val outboundUser = TutorMessage("user", q, imageBase64 = frameForRequest)
+                val reply = ProviderTransport().generate(p, key, prompt, history + outboundUser) { partial ->
                     withContext(Dispatchers.Main) { answer = partial }
                 }
                 ensureActive()
                 require(profiles.activeId == p.id) { "تم تغيير المزوّد؛ أعد إرسال سؤالك." }
                 val currentSources = withContext(Dispatchers.IO) { sourceStore.sources(lesson) }
-                require(general || currentSources == snapshot) { "تغيّر مصدر الدرس؛ أعد السؤال." }
-                val cited = if (general) emptyList() else TutorGrounding.references(reply.text, selected)
-                if (!general && cited.isEmpty()) {
+                require(general || allowVisionWithoutTranscript || currentSources == snapshot) { "تغيّر مصدر الدرس؛ أعد السؤال." }
+                val cited = if (general || allowVisionWithoutTranscript) emptyList() else TutorGrounding.references(reply.text, selected)
+                if (!general && !allowVisionWithoutTranscript && cited.isEmpty()) {
                     infoBanner = "لم تُذكر إحالات زمنية؛ راجع الإجابة مع الدرس."
                 }
                 val tag = when {
+                    allowVisionWithoutTranscript || (frameForRequest != null && cited.isEmpty()) -> "[General help]"
                     general -> "[General help]"
                     cited.isNotEmpty() -> "[Lesson evidence]"
                     else -> "[Unverified answer]"
                 }
-                messages = (messages + TutorMessage("user", q) + TutorMessage("assistant", "$tag\n${reply.text}")).takeLast(20)
+                val savedUserText = if (frameForRequest != null) {
+                    "[لقطة ${formatTimeMs(frameTimeForRequest)}] $q"
+                } else {
+                    q
+                }
+                messages = (messages + TutorMessage("user", savedUserText) + TutorMessage("assistant", "$tag\n${reply.text}")).takeLast(20)
                 withContext(Dispatchers.IO) { sourceStore.saveHistory(lesson, requestScope, messages) }
                 usage = reply.usage
+                attachedFrameBase64 = null
                 if (overrideQuestion == null) question = ""
                 answer = ""
             } catch (e: CancellationException) {
@@ -283,7 +308,7 @@ fun TutorDialog(
         }
     }
 
-    val canChat = profile != null && !loading && !downloadingTranscript && (general || sources.isNotEmpty())
+    val canChat = profile != null && !loading && !downloadingTranscript && (general || sources.isNotEmpty() || attachedFrameBase64 != null)
 
     Dialog(
         onDismissRequest = { work?.cancel(); onClose() },
@@ -506,6 +531,31 @@ fun TutorDialog(
                                     )
                                 }
 
+                                attachedFrameBase64 != null -> {
+                                    Text(
+                                        text = "تم التقاط لقطة من الفيديو عند ${formatTimeMs(attachedFrameTimeMs)}",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        textAlign = TextAlign.Center
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = "اسأل المعلّم عن المعادلة أو الرسم الظاهر في اللقطة أو اضغط الزر أدناه للشرح الفوري.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        textAlign = TextAlign.Center
+                                    )
+                                    Spacer(modifier = Modifier.height(14.dp))
+                                    Button(
+                                        onClick = { send("اشرح المعادلة أو الرسم الظاهر في هذه اللقطة بالتفصيل.") },
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        Icon(Icons.Default.PhotoCamera, contentDescription = null, modifier = Modifier.size(18.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("اشرح ما في اللقطة")
+                                    }
+                                }
+
                                 sources.isEmpty() && !general && !loading -> {
                                     Text(
                                         text = "نص الدرس غير متوفر بعد",
@@ -647,6 +697,59 @@ fun TutorDialog(
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                        }
+                    }
+                }
+
+                attachedFrameBase64?.let {
+                    Surface(
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 4.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PhotoCamera,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = "لقطة الفيديو عند ${formatTimeMs(attachedFrameTimeMs)}",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                modifier = Modifier.weight(1f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            if (canChat && !busy) {
+                                AssistChip(
+                                    onClick = { send("اشرح المعادلة أو الرسم الظاهر في هذه اللقطة بالتفصيل.") },
+                                    label = { Text("اشرح اللقطة") }
+                                )
+                            }
+                            IconButton(
+                                onClick = { attachedFrameBase64 = null },
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .semantics { contentDescription = "إزالة اللقطة المرفقة" }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -1073,7 +1176,7 @@ private fun StreamingTutorBubble(partialText: String) {
 }
 
 @Composable
-private fun FormattedChatText(
+internal fun FormattedChatText(
     rawText: String,
     textColor: Color,
     accentColor: Color,

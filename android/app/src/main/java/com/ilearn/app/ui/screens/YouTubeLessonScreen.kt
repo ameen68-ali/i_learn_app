@@ -68,7 +68,10 @@ fun YouTubeLessonScreen(
     translationError: String? = null,
     onTranslateToArabic: () -> Unit = {},
     onCancelTranslation: () -> Unit = {},
-    onDismissTranslationError: () -> Unit = {}
+    onDismissTranslationError: () -> Unit = {},
+    initialSeekMs: Long = -1L,
+    externalSeekRequest: Pair<Long, Long>? = null,
+    onStudyPack: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val activity = remember(context) { context.findActivity() }
@@ -77,7 +80,22 @@ fun YouTubeLessonScreen(
     val state by session.state.collectAsState()
     val fullscreen by session.fullscreen.collectAsState()
     var tutor by remember(lesson.id) { mutableStateOf(false) }
+    var showTranscriptSheet by remember(lesson.id) { mutableStateOf(false) }
+    var appliedInitialSeek by remember(lesson.id, initialSeekMs) { mutableStateOf(false) }
     val saveProgress by rememberUpdatedState(onProgress)
+
+    LaunchedEffect(state.ready, initialSeekMs) {
+        if (state.ready && initialSeekMs > 0L && !appliedInitialSeek) {
+            appliedInitialSeek = true
+            session.seekAndPlay(initialSeekMs)
+        }
+    }
+
+    LaunchedEffect(externalSeekRequest) {
+        externalSeekRequest?.first?.let { targetMs ->
+            session.seekAndPlay(targetMs)
+        }
+    }
 
     fun openExternalYouTube() {
         val videoId = lesson.remoteId ?: return
@@ -179,6 +197,26 @@ fun YouTubeLessonScreen(
                         }
                     },
                     actions = {
+                        IconButton(
+                            onClick = { showTranscriptSheet = true },
+                            modifier = Modifier.size(44.dp).semantics { contentDescription = "النص التفاعلي للدرس" }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Article,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        IconButton(
+                            onClick = { session.pause(); onStudyPack() },
+                            modifier = Modifier.size(44.dp).semantics { contentDescription = "حزمة الدراسة الذكية" }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AutoAwesome,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
                         IconButton(
                             onClick = { onBookmark(!lesson.isBookmarked) },
                             modifier = Modifier.size(48.dp).semantics {
@@ -577,6 +615,18 @@ fun YouTubeLessonScreen(
                 )
             }
         }
+    }
+
+    if (showTranscriptSheet) {
+        com.ilearn.app.ui.components.TranscriptSheet(
+            lesson = lesson,
+            currentPositionMs = state.positionMs,
+            onSeek = {
+                showTranscriptSheet = false
+                session.seekAndPlay(it)
+            },
+            onDismiss = { showTranscriptSheet = false }
+        )
     }
 
     if (tutor) {
