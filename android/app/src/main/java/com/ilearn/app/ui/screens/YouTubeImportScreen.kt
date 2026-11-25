@@ -320,7 +320,7 @@ fun YouTubeImportScreen(
                                 modifier = Modifier.weight(1f)
                             )
                             FilledIconButton(
-                                enabled = !busy,
+                                enabled = !busy && result.lessons.isNotEmpty(),
                                 onClick = {
                                     job = scope.launch {
                                         busy = true
@@ -365,13 +365,13 @@ fun YouTubeImportScreen(
                                 )
                             }
                             Surface(
-                                color = Color(0xFF10B981).copy(alpha = 0.16f),
+                                color = MaterialTheme.colorScheme.secondaryContainer,
                                 shape = RoundedCornerShape(8.dp)
                             ) {
                                 Text(
                                     text = "$availableCount متاح للتشغيل",
                                     style = MaterialTheme.typography.labelMedium,
-                                    color = Color(0xFF10B981),
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
                                     fontWeight = FontWeight.Bold,
                                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                                 )
@@ -380,7 +380,14 @@ fun YouTubeImportScreen(
 
                         HorizontalDivider()
 
-                        result.lessons.take(12).forEach { lesson ->
+                        if (result.lessons.isEmpty()) {
+                            Text(
+                                text = "لم يُعثر على دروس متاحة داخل هذه القائمة.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            result.lessons.take(12).forEach { lesson ->
                             Row(
                                 modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
                                 verticalAlignment = Alignment.CenterVertically
@@ -421,6 +428,7 @@ fun YouTubeImportScreen(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                        }
                         }
                     }
                 }

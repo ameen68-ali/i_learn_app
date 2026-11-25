@@ -346,18 +346,39 @@ fun ProviderSettingsScreen(store: ProviderProfileStore, onBack: () -> Unit) {
                         )
                     }
 
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(checked = streaming, onCheckedChange = { streaming = it })
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .toggleable(value = streaming, role = Role.Checkbox, onValueChange = { streaming = it })
+                    ) {
+                        Checkbox(checked = streaming, onCheckedChange = null)
+                        Spacer(modifier = Modifier.width(8.dp))
                         Text("Streaming (disable for endpoints without SSE)", style = MaterialTheme.typography.bodySmall)
                     }
                     if (format == ApiFormat.OPENAI_CHAT) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Checkbox(checked = modernTokens, onCheckedChange = { modernTokens = it })
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 48.dp)
+                                .toggleable(value = modernTokens, role = Role.Checkbox, onValueChange = { modernTokens = it })
+                        ) {
+                            Checkbox(checked = modernTokens, onCheckedChange = null)
+                            Spacer(modifier = Modifier.width(8.dp))
                             Text("Use max_completion_tokens for newer Chat models", style = MaterialTheme.typography.bodySmall)
                         }
                     }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(checked = rememberKey, onCheckedChange = { rememberKey = it })
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .toggleable(value = rememberKey, role = Role.Checkbox, onValueChange = { rememberKey = it })
+                    ) {
+                        Checkbox(checked = rememberKey, onCheckedChange = null)
+                        Spacer(modifier = Modifier.width(8.dp))
                         Text("Remember key encrypted on this device", style = MaterialTheme.typography.bodySmall)
                     }
                     Text(
@@ -416,7 +437,11 @@ fun ProviderSettingsScreen(store: ProviderProfileStore, onBack: () -> Unit) {
                                 .size(48.dp)
                                 .semantics { contentDescription = "Test connection" }
                         ) {
-                            Icon(Icons.Default.NetworkCheck, contentDescription = null)
+                            if (testing) {
+                                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Default.NetworkCheck, contentDescription = null)
+                            }
                         }
                     }
 

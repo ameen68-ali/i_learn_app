@@ -1721,7 +1721,7 @@ fun StudyNotesSection(
                         ) {
                             // Clickable Timestamp Badge
                             Surface(
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
+                                color = Color(0xFF38BDF8).copy(alpha = 0.2f),
                                 shape = RoundedCornerShape(6.dp),
                                 modifier = Modifier
                                     .clickable { onSeekToTimestamp(note.timestampMs) }
@@ -1731,7 +1731,7 @@ fun StudyNotesSection(
                             ) {
                                 Text(
                                     text = formatTimeMs(note.timestampMs),
-                                    color = MaterialTheme.colorScheme.primary,
+                                    color = Color(0xFF38BDF8),
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
                                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)

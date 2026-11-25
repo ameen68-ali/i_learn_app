@@ -315,16 +315,57 @@ fun CourseCatalogScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            if (courses.isEmpty()) {
-                EmptyCoursesView(
-                    onImportClick = { showCourseImportSheet = true }
-                )
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                persistentImportError?.let { errMsg ->
+                    Surface(
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(start = 14.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = MaterialTheme.colorScheme.onErrorContainer)
+                            Text(
+                                text = errMsg,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.weight(1f)
+                            )
+                            IconButton(
+                                onClick = {
+                                    persistentImportError = null
+                                    showCourseImportSheet = true
+                                },
+                                modifier = Modifier.size(44.dp).semantics { contentDescription = "إعادة محاولة الاستيراد" }
+                            ) {
+                                Icon(Icons.Default.Refresh, contentDescription = null, tint = MaterialTheme.colorScheme.onErrorContainer)
+                            }
+                            IconButton(
+                                onClick = { persistentImportError = null },
+                                modifier = Modifier.size(44.dp).semantics { contentDescription = "إخفاء الخطأ" }
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = null, tint = MaterialTheme.colorScheme.onErrorContainer)
+                            }
+                        }
+                    }
+                }
+
+                if (courses.isEmpty()) {
+                    EmptyCoursesView(
+                        onImportClick = { showCourseImportSheet = true },
+                        onAddYouTube = onAddYouTube
+                    )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                        contentPadding = PaddingValues(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
                     // 1. Search Bar
                     item {
                         OutlinedTextField(
@@ -447,6 +488,7 @@ fun CourseCatalogScreen(
                         Spacer(modifier = Modifier.height(72.dp))
                     }
                 }
+            }
             }
 
             // Extraction Loading Dialog
@@ -1094,7 +1136,7 @@ fun CourseCard(
                     Icon(
                         imageVector = Icons.Default.DeleteOutline,
                         contentDescription = "حذف كورس ${course.title}",
-                        tint = MaterialTheme.colorScheme.outline
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
@@ -1108,7 +1150,7 @@ fun CourseCard(
                     .fillMaxWidth()
                     .height(8.dp)
                     .clip(RoundedCornerShape(4.dp)),
-                color = if (course.isCompleted) Color(0xFF10B981) else MaterialTheme.colorScheme.primary,
+                color = if (course.isCompleted) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary,
                 trackColor = MaterialTheme.colorScheme.surfaceVariant
             )
 
@@ -1121,13 +1163,13 @@ fun CourseCard(
                 Text(
                     text = "${course.completedLessons} من ${course.totalLessons} درساً مكتمل",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.outline
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
                     text = "${course.progressPercentage}%",
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Bold,
-                    color = if (course.isCompleted) Color(0xFF10B981) else MaterialTheme.colorScheme.primary
+                    color = if (course.isCompleted) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary
                 )
             }
         }
