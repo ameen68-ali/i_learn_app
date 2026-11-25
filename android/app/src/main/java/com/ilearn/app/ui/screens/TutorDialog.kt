@@ -937,27 +937,20 @@ private fun ChatBubble(
                             Spacer(modifier = Modifier.weight(1f))
                         }
 
-                        TextButton(
+                        IconButton(
                             onClick = {
                                 clipboard.setText(AnnotatedString(displayBody))
                                 copied = true
                             },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                             modifier = Modifier
-                                .heightIn(min = 32.dp)
+                                .size(36.dp)
                                 .semantics { contentDescription = "نسخ الرد" }
                         ) {
                             Icon(
                                 imageVector = if (copied) Icons.Default.Check else Icons.Default.ContentCopy,
                                 contentDescription = null,
                                 tint = if (copied) Color(0xFF10B981) else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = if (copied) "تم النسخ" else "نسخ",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (copied) Color(0xFF10B981) else MaterialTheme.colorScheme.onSurfaceVariant
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }

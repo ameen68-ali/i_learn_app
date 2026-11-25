@@ -2,6 +2,7 @@ package com.ilearn.app.data
 
 import android.content.Context
 import android.net.Uri
+import com.ilearn.app.importer.CourseArchiveExporter
 import com.ilearn.app.importer.CourseArchiveImporter
 import com.ilearn.app.importer.ImportState
 import com.ilearn.app.utils.AudioExtractorHelper
@@ -181,6 +182,15 @@ class CourseRepository(private val context: Context) {
 
     suspend fun removeOfflineYouTubeVideo(lesson: Lesson): Boolean {
         return youtubeDownloader.removeOfflineVideo(lesson)
+    }
+
+    suspend fun exportOfflineCourseZip(
+        course: Course,
+        lessons: List<Lesson>,
+        targetUri: Uri,
+        onProgress: (Float, String) -> Unit = { _, _ -> }
+    ) {
+        CourseArchiveExporter.exportCourseToZip(context, course, lessons, targetUri, onProgress)
     }
 
     suspend fun deleteCourse(course: Course) = withContext(Dispatchers.IO) {

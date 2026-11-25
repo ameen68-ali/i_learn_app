@@ -286,53 +286,81 @@ fun YouTubeLessonScreen(
                         }
                     }
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Button(
-                            onClick = { session.pause(); tutor = true },
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.weight(1f).heightIn(min = 48.dp)
+                        val index = lessons.indexOfFirst { it.id == lesson.id }
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Default.SmartToy, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("المعلّم الذكي", fontWeight = FontWeight.Bold, maxLines = 1)
-                        }
-
-                        if (lesson.isAvailable && lesson.remoteId != null) {
-                            if (downloadState != null) {
-                                OutlinedButton(
-                                    onClick = onCancelDownload,
-                                    shape = RoundedCornerShape(12.dp),
-                                    modifier = Modifier.heightIn(min = 48.dp)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(
+                                    enabled = index > 0,
+                                    onClick = { if (index > 0) onNavigate(lessons[index - 1]) },
+                                    modifier = Modifier.size(44.dp).semantics { contentDescription = "الدرس السابق" }
                                 ) {
-                                    Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(18.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("${(downloadState.progress * 100).toInt()}%")
+                                    Icon(Icons.AutoMirrored.Filled.NavigateBefore, contentDescription = null)
                                 }
-                            } else {
-                                FilledTonalButton(
-                                    onClick = onDownloadOffline,
-                                    shape = RoundedCornerShape(12.dp),
-                                    modifier = Modifier.heightIn(min = 48.dp)
+                                Text(
+                                    text = "${formatTimeMs(state.positionMs)} / ${formatTimeMs(state.durationMs)}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                IconButton(
+                                    enabled = index >= 0 && index < lessons.lastIndex,
+                                    onClick = { if (index >= 0 && index < lessons.lastIndex) onNavigate(lessons[index + 1]) },
+                                    modifier = Modifier.size(44.dp).semantics { contentDescription = "الدرس التالي" }
                                 ) {
-                                    Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("360p")
+                                    Icon(Icons.AutoMirrored.Filled.NavigateNext, contentDescription = null)
                                 }
                             }
-                        }
 
-                        FilledTonalButton(
-                            enabled = lesson.remoteId != null,
-                            onClick = ::openExternalYouTube,
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.heightIn(min = 48.dp)
-                        ) {
-                            Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("YouTube")
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                                FilledTonalIconButton(
+                                    onClick = { session.pause(); tutor = true },
+                                    modifier = Modifier.size(44.dp).semantics { contentDescription = "المعلّم الذكي" }
+                                ) {
+                                    Icon(Icons.Default.SmartToy, contentDescription = null, modifier = Modifier.size(20.dp))
+                                }
+
+                                if (lesson.isAvailable && lesson.remoteId != null) {
+                                    if (downloadState != null) {
+                                        IconButton(
+                                            onClick = onCancelDownload,
+                                            modifier = Modifier.size(44.dp).semantics { contentDescription = "إلغاء التحميل" }
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                CircularProgressIndicator(
+                                                    progress = { downloadState.progress.coerceIn(0f, 1f) },
+                                                    strokeWidth = 2.5.dp,
+                                                    modifier = Modifier.size(28.dp)
+                                                )
+                                                Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(14.dp))
+                                            }
+                                        }
+                                    } else {
+                                        IconButton(
+                                            onClick = onDownloadOffline,
+                                            modifier = Modifier.size(44.dp).semantics { contentDescription = "تحميل أوفلاين 360p" }
+                                        ) {
+                                            Icon(Icons.Default.DownloadForOffline, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                        }
+                                    }
+                                }
+
+                                IconButton(
+                                    enabled = lesson.remoteId != null,
+                                    onClick = ::openExternalYouTube,
+                                    modifier = Modifier.size(44.dp).semantics { contentDescription = "فتح في YouTube" }
+                                ) {
+                                    Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(20.dp))
+                                }
+                            }
                         }
                     }
 
@@ -378,45 +406,9 @@ fun YouTubeLessonScreen(
                                     style = MaterialTheme.typography.bodySmall,
                                     modifier = Modifier.weight(1f)
                                 )
-                                TextButton(onClick = { onDismissDownloadError(); onDownloadOffline() }) {
-                                    Text("إعادة")
+                                IconButton(onClick = { onDismissDownloadError(); onDownloadOffline() }) {
+                                    Icon(Icons.Default.Refresh, contentDescription = "إعادة التحميل", tint = MaterialTheme.colorScheme.onErrorContainer)
                                 }
-                            }
-                        }
-                    }
-
-                    Surface(
-                        color = MaterialTheme.colorScheme.surfaceContainerLow,
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        val index = lessons.indexOfFirst { it.id == lesson.id }
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            TextButton(
-                                enabled = index > 0,
-                                onClick = { if (index > 0) onNavigate(lessons[index - 1]) }
-                            ) {
-                                Icon(Icons.AutoMirrored.Filled.NavigateBefore, contentDescription = null)
-                                Text("السابق")
-                            }
-
-                            Text(
-                                text = "${formatTimeMs(state.positionMs)} / ${formatTimeMs(state.durationMs)}",
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-
-                            TextButton(
-                                enabled = index >= 0 && index < lessons.lastIndex,
-                                onClick = { if (index >= 0 && index < lessons.lastIndex) onNavigate(lessons[index + 1]) }
-                            ) {
-                                Text("التالي")
-                                Icon(Icons.AutoMirrored.Filled.NavigateNext, contentDescription = null)
                             }
                         }
                     }

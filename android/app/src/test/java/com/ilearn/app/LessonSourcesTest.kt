@@ -106,4 +106,63 @@ class LessonSourcesTest {
         assertEquals("ar", YouTubeTranscriptClient.chooseTrackForLanguage(tracks, "ar")?.languageCode)
         assertNull(YouTubeTranscriptClient.chooseTrackForLanguage(tracks, "fr"))
     }
+
+    @Test fun courseArchiveExporterPackagesOfflineVideosAndSubtitlesForImport() {
+        val dir = java.io.File.createTempFile("ilearn_export_test", "").apply {
+            delete()
+            mkdirs()
+        }
+        try {
+            val video1 = java.io.File(dir, "v1.mp4").apply { writeBytes(byteArrayOf(1, 2, 3, 4)) }
+            val video2 = java.io.File(dir, "v2.mp4").apply { writeBytes(byteArrayOf(5, 6, 7, 8)) }
+            val subAr = java.io.File(dir, "v1.ar.vtt").apply { writeText("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nمرحبا") }
+            val subEn = java.io.File(dir, "v1.en.vtt").apply { writeText("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHello") }
+
+            val course = com.ilearn.app.data.Course(
+                id = "youtube:PLtest",
+                title = "ML: Linear Algebra?",
+                folderUri = "youtube://playlist/PLtest",
+                sourceType = com.ilearn.app.data.SourceType.YOUTUBE
+            )
+            val incompleteLessons = listOf(
+                com.ilearn.app.data.Lesson("l1", course.id, 1, "Intro", video1.absolutePath, subAr.absolutePath, subEn.absolutePath, sourceType = com.ilearn.app.data.SourceType.YOUTUBE),
+                com.ilearn.app.data.Lesson("l2", course.id, 2, "Vectors", "youtube://video/abc", sourceType = com.ilearn.app.data.SourceType.YOUTUBE)
+            )
+            assertFalse(com.ilearn.app.importer.CourseArchiveExporter.canExportOfflineCourse(emptyList()))
+            assertFalse(com.ilearn.app.importer.CourseArchiveExporter.canExportOfflineCourse(incompleteLessons))
+
+            val offlineLessons = listOf(
+                incompleteLessons[0],
+                com.ilearn.app.data.Lesson("l2", course.id, 2, "02 - Intro", video2.absolutePath, sourceType = com.ilearn.app.data.SourceType.YOUTUBE)
+            )
+            assertTrue(com.ilearn.app.importer.CourseArchiveExporter.canExportOfflineCourse(offlineLessons))
+            assertEquals("ML_Linear_Algebra", com.ilearn.app.importer.CourseArchiveExporter.safeArchiveName(course.title))
+
+            val baos = java.io.ByteArrayOutputStream()
+            com.ilearn.app.importer.CourseArchiveExporter.writeCourseZip(course, offlineLessons, baos)
+
+            val entries = mutableMapOf<String, ByteArray>()
+            java.util.zip.ZipInputStream(baos.toByteArray().inputStream()).use { zis ->
+                while (true) {
+                    val entry = zis.nextEntry ?: break
+                    entries[entry.name] = zis.readBytes()
+                    zis.closeEntry()
+                }
+            }
+            assertEquals(
+                setOf(
+                    "ML_Linear_Algebra/compressed_videos/001_Intro.mp4",
+                    "ML_Linear_Algebra/subtitles_ar/001_Intro.vtt",
+                    "ML_Linear_Algebra/subtitles_en/001_Intro.vtt",
+                    "ML_Linear_Algebra/compressed_videos/002_Intro.mp4"
+                ),
+                entries.keys
+            )
+            assertArrayEquals(byteArrayOf(1, 2, 3, 4), entries["ML_Linear_Algebra/compressed_videos/001_Intro.mp4"])
+            assertTrue(entries["ML_Linear_Algebra/subtitles_ar/001_Intro.vtt"]!!.decodeToString().contains("مرحبا"))
+            assertTrue(entries["ML_Linear_Algebra/subtitles_en/001_Intro.vtt"]!!.decodeToString().contains("Hello"))
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
 }

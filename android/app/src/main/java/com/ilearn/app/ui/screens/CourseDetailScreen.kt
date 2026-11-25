@@ -1,5 +1,8 @@
 package com.ilearn.app.ui.screens
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -31,9 +34,13 @@ import androidx.compose.ui.unit.sp
 import com.ilearn.app.data.Course
 import com.ilearn.app.data.Lesson
 import com.ilearn.app.data.SourceType
+import com.ilearn.app.importer.CourseArchiveExporter
 import com.ilearn.app.ui.components.CompletionCelebrationDialog
 import com.ilearn.app.ui.components.ContextualEmptyState
 import com.ilearn.app.youtube.LessonDownloadState
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 
 enum class LessonFilter(val label: String) {
     ALL("الكل"),
@@ -58,14 +65,50 @@ fun CourseDetailScreen(
     onDownloadLesson: (Lesson) -> Unit = {},
     onCancelDownload: (String) -> Unit = {},
     onRemoveOfflineLesson: (Lesson) -> Unit = {},
-    onDismissDownloadError: (String) -> Unit = {}
+    onDismissDownloadError: (String) -> Unit = {},
+    onExportOfflineCourse: suspend (Uri, (Float, String) -> Unit) -> Unit = { _, _ -> }
 ) {
     var selectedFilter by remember { mutableStateOf(LessonFilter.ALL) }
     var searchQuery by remember { mutableStateOf("") }
     var showCelebrationDialog by remember { mutableStateOf(false) }
     var hasAutoShownCelebration by remember { mutableStateOf(false) }
     var lessonToDeleteOffline by remember { mutableStateOf<Lesson?>(null) }
+    var exportProgress by remember { mutableStateOf<Float?>(null) }
+    var exportCurrentLabel by remember { mutableStateOf("") }
+    var exportJob by remember { mutableStateOf<Job?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    val canExportCourse = remember(lessons) { CourseArchiveExporter.canExportOfflineCourse(lessons) }
+
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/zip")
+    ) { targetUri ->
+        if (targetUri != null) {
+            exportJob?.cancel()
+            exportJob = scope.launch {
+                exportProgress = 0f
+                exportCurrentLabel = "جاري تجهيز ملفات الكورس..."
+                try {
+                    onExportOfflineCourse(targetUri) { progress, label ->
+                        exportProgress = progress
+                        exportCurrentLabel = label
+                    }
+                    exportProgress = null
+                    snackbarHostState.showSnackbar("تم تصدير الكورس بنجاح (ZIP) وجاهز للاستيراد أوفلاين")
+                } catch (e: CancellationException) {
+                    exportProgress = null
+                    snackbarHostState.showSnackbar("تم إلغاء التصدير")
+                    throw e
+                } catch (e: Exception) {
+                    exportProgress = null
+                    snackbarHostState.showSnackbar(
+                        "تعذّر تصدير الكورس: ${e.message ?: "خطأ غير متوقع"}",
+                        duration = SnackbarDuration.Long
+                    )
+                }
+            }
+        }
+    }
 
     LaunchedEffect(lessonDownloadErrors) {
         val firstEntry = lessonDownloadErrors.entries.firstOrNull()
@@ -138,6 +181,58 @@ fun CourseDetailScreen(
         )
     }
 
+    exportProgress?.let { progress ->
+        AlertDialog(
+            onDismissRequest = {},
+            icon = { Icon(Icons.Default.FolderZip, contentDescription = null, tint = Color(0xFF10B981)) },
+            title = { Text("جاري تصدير الكورس (ZIP)...", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    LinearProgressIndicator(
+                        progress = { progress.coerceIn(0f, 1f) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(8.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = exportCurrentLabel,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "${(progress * 100).toInt()}%",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                IconButton(
+                    onClick = { exportJob?.cancel() },
+                    modifier = Modifier.semantics { contentDescription = "إلغاء التصدير" }
+                ) {
+                    Icon(Icons.Default.Close, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                }
+            }
+        )
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
@@ -161,6 +256,20 @@ fun CourseDetailScreen(
                     }
                 },
                 actions = {
+                    if (canExportCourse) {
+                        IconButton(
+                            onClick = {
+                                val suggestedName = "${CourseArchiveExporter.safeArchiveName(course.title)}_offline.zip"
+                                exportLauncher.launch(suggestedName)
+                            },
+                            enabled = exportProgress == null,
+                            modifier = Modifier
+                                .size(48.dp)
+                                .semantics { contentDescription = "تصدير الكورس كملف ZIP" }
+                        ) {
+                            Icon(Icons.Default.FolderZip, contentDescription = null, tint = Color(0xFF10B981))
+                        }
+                    }
                     if (course.sourceType == com.ilearn.app.data.SourceType.YOUTUBE) {
                         IconButton(
                             onClick = onRefresh,
@@ -202,12 +311,32 @@ fun CourseDetailScreen(
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold
                             )
-                            Text(
-                                text = "$progressPct%",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = if (progressPct == 100) Color(0xFF10B981) else MaterialTheme.colorScheme.primary
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                if (progressPct == 100) {
+                                    IconButton(
+                                        onClick = { showCelebrationDialog = true },
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .semantics { contentDescription = "عرض وسام إتمام الكورس" }
+                                    ) {
+                                        Icon(
+                                            Icons.Default.EmojiEvents,
+                                            contentDescription = null,
+                                            tint = Color(0xFFF59E0B),
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = "$progressPct%",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = if (progressPct == 100) Color(0xFF10B981) else MaterialTheme.colorScheme.primary
+                                )
+                            }
                         }
 
                         Spacer(modifier = Modifier.height(10.dp))
@@ -225,46 +354,61 @@ fun CourseDetailScreen(
                         Spacer(modifier = Modifier.height(8.dp))
 
                         Text(
-                            text = "$completedCount من إجمالي ${lessons.size} درساً مكتمل",
+                            text = "$completedCount من إجمالي ${lessons.size} درساً مكتمل" +
+                                if (canExportCourse) " • جاهز للتصدير أوفلاين (ZIP)" else "",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
 
-                        if (progressPct == 100) {
-                            Spacer(modifier = Modifier.height(10.dp))
-                            OutlinedButton(
-                                onClick = { showCelebrationDialog = true },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .heightIn(min = 48.dp),
-                                shape = RoundedCornerShape(12.dp),
-                                colors = ButtonDefaults.outlinedButtonColors(
-                                    contentColor = Color(0xFF10B981)
-                                )
-                            ) {
-                                Icon(Icons.Default.EmojiEvents, contentDescription = null, tint = Color(0xFFF59E0B))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("عرض وسام إتمام الكورس 🏆", fontWeight = FontWeight.Bold)
-                            }
-                        }
-
-                        nextLesson?.let { next ->
+                        if (nextLesson != null || canExportCourse) {
                             Spacer(modifier = Modifier.height(12.dp))
-                            Button(
-                                onClick = { onSelectLesson(next) },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .heightIn(min = 48.dp),
-                                shape = RoundedCornerShape(12.dp)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Icon(Icons.Default.PlayArrow, contentDescription = null)
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = if (completedCount == 0) "بدء دراسة الكورس" else "متابعة: ${next.title}",
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
+                                if (nextLesson != null) {
+                                    Text(
+                                        text = if (completedCount == 0) "بدء: ${nextLesson.title}" else "متابعة: ${nextLesson.title}",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                } else {
+                                    Spacer(modifier = Modifier.weight(1f))
+                                }
+                                if (canExportCourse) {
+                                    FilledTonalIconButton(
+                                        onClick = {
+                                            val suggestedName = "${CourseArchiveExporter.safeArchiveName(course.title)}_offline.zip"
+                                            exportLauncher.launch(suggestedName)
+                                        },
+                                        enabled = exportProgress == null,
+                                        modifier = Modifier
+                                            .size(44.dp)
+                                            .semantics { contentDescription = "تصدير الكورس كملف ZIP" },
+                                        colors = IconButtonDefaults.filledTonalIconButtonColors(
+                                            containerColor = Color(0xFF10B981).copy(alpha = 0.16f),
+                                            contentColor = Color(0xFF047857)
+                                        )
+                                    ) {
+                                        Icon(Icons.Default.FolderZip, contentDescription = null)
+                                    }
+                                }
+                                nextLesson?.let { next ->
+                                    FilledIconButton(
+                                        onClick = { onSelectLesson(next) },
+                                        modifier = Modifier
+                                            .size(44.dp)
+                                            .semantics {
+                                                contentDescription = if (completedCount == 0) "بدء دراسة الكورس" else "متابعة ${next.title}"
+                                            }
+                                    ) {
+                                        Icon(Icons.Default.PlayArrow, contentDescription = null)
+                                    }
+                                }
                             }
                         }
                     }
@@ -580,152 +724,168 @@ fun LessonItemCard(
                     }
                 }
 
-                Spacer(modifier = Modifier.width(6.dp))
+                Spacer(modifier = Modifier.width(8.dp))
 
-                // Bookmark Star Button (>=48dp touch target, TalkBack semantics, Haptic)
-                IconButton(
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onToggleBookmark(!lesson.isBookmarked)
-                    },
-                    modifier = Modifier
-                        .size(48.dp)
-                        .semantics {
-                            contentDescription = if (lesson.isBookmarked) "إزالة من المفضلة" else "إضافة إلى المفضلة"
-                        }
+                // Compact 2x2 action icon grid keeps the card spacious and uncluttered
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
-                    Icon(
-                        imageVector = if (lesson.isBookmarked) Icons.Default.Star else Icons.Default.StarBorder,
-                        contentDescription = null,
-                        tint = if (lesson.isBookmarked) Color(0xFFF59E0B) else MaterialTheme.colorScheme.outline,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        // Bookmark Star IconButton
+                        IconButton(
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onToggleBookmark(!lesson.isBookmarked)
+                            },
+                            modifier = Modifier
+                                .size(40.dp)
+                                .semantics {
+                                    contentDescription = if (lesson.isBookmarked) "إزالة من المفضلة" else "إضافة إلى المفضلة"
+                                }
+                        ) {
+                            Icon(
+                                imageVector = if (lesson.isBookmarked) Icons.Default.Star else Icons.Default.StarBorder,
+                                contentDescription = null,
+                                tint = if (lesson.isBookmarked) Color(0xFFF59E0B) else MaterialTheme.colorScheme.outline,
+                                modifier = Modifier.size(21.dp)
+                            )
+                        }
 
-                // Completion Checkbox (>=48dp touch target, TalkBack semantics, Haptic)
-                Box(
-                    modifier = Modifier.size(48.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Checkbox(
-                        checked = lesson.isCompleted,
-                        onCheckedChange = { checked ->
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onToggleComplete(checked)
-                        },
-                        colors = CheckboxDefaults.colors(
-                            checkedColor = Color(0xFF10B981)
-                        ),
-                        modifier = Modifier.semantics {
-                            contentDescription = if (lesson.isCompleted) "تم إكمال الدرس" else "تعليم الدرس كمكتمل"
+                        // Offline 360p Download / Cancel / Delete IconButton
+                        if (lesson.sourceType == SourceType.YOUTUBE && lesson.isAvailable && lesson.remoteId != null) {
+                            when {
+                                downloadState != null -> {
+                                    Box(modifier = Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+                                        CircularProgressIndicator(
+                                            progress = { downloadState.progress.coerceIn(0f, 1f) },
+                                            modifier = Modifier.size(28.dp),
+                                            strokeWidth = 2.5.dp
+                                        )
+                                        IconButton(
+                                            onClick = onCancelDownload,
+                                            modifier = Modifier
+                                                .size(40.dp)
+                                                .semantics { contentDescription = "إلغاء التحميل" }
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Close,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.error,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                                lesson.hasOfflineVideo -> {
+                                    IconButton(
+                                        onClick = onRequestRemoveOffline,
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .semantics { contentDescription = "محمّل أوفلاين 360p - انقر لحذف التحميل" }
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.OfflinePin,
+                                            contentDescription = null,
+                                            tint = Color(0xFF10B981),
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                    }
+                                }
+                                else -> {
+                                    IconButton(
+                                        onClick = onDownloadClick,
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .semantics { contentDescription = "تحميل أوفلاين (360p) مع الترجمة" }
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.DownloadForOffline,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                    }
+                                }
+                            }
                         }
-                    )
-                }
+                    }
 
-                // Play Button (>=48dp touch target, TalkBack semantics)
-                IconButton(
-                    onClick = onClick,
-                    modifier = Modifier
-                        .size(48.dp)
-                        .semantics {
-                            contentDescription = "تشغيل الدرس"
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        // Completion Checkbox
+                        Box(
+                            modifier = Modifier.size(40.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Checkbox(
+                                checked = lesson.isCompleted,
+                                onCheckedChange = { checked ->
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    onToggleComplete(checked)
+                                },
+                                colors = CheckboxDefaults.colors(
+                                    checkedColor = Color(0xFF10B981)
+                                ),
+                                modifier = Modifier.semantics {
+                                    contentDescription = if (lesson.isCompleted) "تم إكمال الدرس" else "تعليم الدرس كمكتمل"
+                                }
+                            )
                         }
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.PlayCircle,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(34.dp)
-                    )
+
+                        // Play IconButton
+                        IconButton(
+                            onClick = onClick,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .semantics {
+                                    contentDescription = "تشغيل الدرس"
+                                }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PlayCircle,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
+                    }
                 }
             }
 
-            if (lesson.sourceType == SourceType.YOUTUBE && lesson.isAvailable && lesson.remoteId != null) {
+            if (downloadState != null) {
                 Spacer(modifier = Modifier.height(8.dp))
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                Spacer(modifier = Modifier.height(6.dp))
-                when {
-                    downloadState != null -> {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Text(
-                                        text = downloadState.stage,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Text(
-                                        text = "${(downloadState.progress * 100).toInt()}%",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                }
-                                LinearProgressIndicator(
-                                    progress = { downloadState.progress.coerceIn(0f, 1f) },
-                                    modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp))
-                                )
-                            }
-                            TextButton(
-                                onClick = onCancelDownload,
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                            ) {
-                                Text("إلغاء", color = MaterialTheme.colorScheme.error)
-                            }
-                        }
-                    }
-
-                    lesson.hasOfflineVideo -> {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Icon(Icons.Default.OfflinePin, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(18.dp))
-                                Text(
-                                    text = "متاح بدون إنترنت (360p) • بالمشغل المحلي",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = Color(0xFF047857),
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                            TextButton(
-                                onClick = onRequestRemoveOffline,
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                            ) {
-                                Text("حذف التحميل", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
-                            }
-                        }
-                    }
-
-                    else -> {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.End
-                        ) {
-                            FilledTonalButton(
-                                onClick = onDownloadClick,
-                                shape = RoundedCornerShape(10.dp),
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                modifier = Modifier.heightIn(min = 38.dp)
-                            ) {
-                                Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("تحميل أوفلاين (360p) + الترجمة", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
-                            }
-                        }
-                    }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = downloadState.stage,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "${(downloadState.progress * 100).toInt()}%",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
                 }
+                Spacer(modifier = Modifier.height(4.dp))
+                LinearProgressIndicator(
+                    progress = { downloadState.progress.coerceIn(0f, 1f) },
+                    modifier = Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(3.dp))
+                )
             }
         }
     }

@@ -183,6 +183,9 @@ class MainActivity : ComponentActivity() {
                                         },
                                         onDismissDownloadError = { lessonId ->
                                             repository.dismissDownloadError(lessonId)
+                                        },
+                                        onExportOfflineCourse = { targetUri, onProgress ->
+                                            repository.exportOfflineCourseZip(currentCourse, lessons, targetUri, onProgress)
                                         }
                                     )
                                 }

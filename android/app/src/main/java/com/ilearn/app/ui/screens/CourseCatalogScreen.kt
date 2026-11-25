@@ -210,15 +210,21 @@ fun CourseCatalogScreen(
                     }
                 },
                 actions = {
-                    FilledTonalButton(
+                    FilledTonalIconButton(
                         onClick = { showCourseImportSheet = true },
-                        shape = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                        modifier = Modifier.height(40.dp)
+                        modifier = Modifier
+                            .size(44.dp)
+                            .semantics { contentDescription = "استيراد كورس" }
                     ) {
-                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("استيراد كورس", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Icon(Icons.Default.Add, contentDescription = null)
+                    }
+                    IconButton(
+                        onClick = onAddYouTube,
+                        modifier = Modifier
+                            .size(44.dp)
+                            .semantics { contentDescription = "إضافة كورس من YouTube" }
+                    ) {
+                        Icon(Icons.Default.OndemandVideo, contentDescription = null, tint = Color(0xFFEF4444))
                     }
 
                     // 3-dots overflow menu
@@ -300,11 +306,7 @@ fun CourseCatalogScreen(
                     shape = RoundedCornerShape(16.dp),
                     modifier = Modifier.semantics { contentDescription = "زر إضافة واستيراد كورس جديد" }
                 ) {
-                    Row(modifier = Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.UploadFile, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("إضافة كورس", fontWeight = FontWeight.SemiBold)
-                    }
+                    Icon(Icons.Default.UploadFile, contentDescription = null)
                 }
             }
         }
@@ -995,13 +997,13 @@ fun ContinueLearningHeroCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End
             ) {
-                Button(
+                FilledIconButton(
                     onClick = onClick,
-                    shape = RoundedCornerShape(12.dp)
+                    modifier = Modifier
+                        .size(48.dp)
+                        .semantics { contentDescription = "متابعة الدرس" }
                 ) {
                     Icon(Icons.Default.PlayArrow, contentDescription = null)
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("متابعة الدرس")
                 }
             }
         }

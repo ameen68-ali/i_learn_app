@@ -165,37 +165,60 @@ fun ProviderSettingsScreen(store: ProviderProfileStore, onBack: () -> Unit) {
                             }
                             Text("${p.format.name.replace('_', ' ')} • ${p.model}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                             Text(p.endpoint, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                 if (!isActive) {
-                                    FilledTonalButton(
+                                    FilledTonalIconButton(
                                         onClick = { store.activeId = p.id; profiles = store.profiles(); isError = false; status = "Selected ${p.name}" },
-                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-                                    ) { Text("Use") }
-                                }
-                                TextButton(onClick = {
-                                    editing = p.id
-                                    name = p.name
-                                    format = p.format
-                                    endpoint = p.endpoint
-                                    model = p.model
-                                    output = p.maxOutputTokens.toString()
-                                    context = p.contextChars.toString()
-                                    version = p.apiVersion
-                                    streaming = p.stream
-                                    modernTokens = p.modernChatTokens
-                                    key = ""
-                                    rememberKey = false
-                                    isError = false
-                                    status = "أعد إدخال المفتاح لتحديث هذا المزوّد"
-                                }) { Text("Edit / replace key") }
-                                TextButton(onClick = {
-                                    store.delete(p.id)
-                                    profiles = store.profiles()
-                                    if (editing == p.id) {
-                                        editing = null
-                                        key = ""
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .semantics { contentDescription = "Use profile ${p.name}" }
+                                    ) {
+                                        Icon(Icons.Default.CheckCircleOutline, contentDescription = null, modifier = Modifier.size(20.dp))
                                     }
-                                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                }
+                                IconButton(
+                                    onClick = {
+                                        editing = p.id
+                                        name = p.name
+                                        format = p.format
+                                        endpoint = p.endpoint
+                                        model = p.model
+                                        output = p.maxOutputTokens.toString()
+                                        context = p.contextChars.toString()
+                                        version = p.apiVersion
+                                        streaming = p.stream
+                                        modernTokens = p.modernChatTokens
+                                        key = ""
+                                        rememberKey = false
+                                        isError = false
+                                        status = "أعد إدخال المفتاح لتحديث هذا المزوّد"
+                                    },
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .semantics { contentDescription = "Edit / replace key for ${p.name}" }
+                                ) {
+                                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(20.dp))
+                                }
+                                IconButton(
+                                    onClick = {
+                                        store.delete(p.id)
+                                        profiles = store.profiles()
+                                        if (editing == p.id) {
+                                            editing = null
+                                            key = ""
+                                        }
+                                    },
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .semantics { contentDescription = "Delete profile ${p.name}" }
+                                ) {
+                                    Icon(Icons.Default.DeleteOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
+                                }
                             }
                         }
                     }
@@ -336,7 +359,11 @@ fun ProviderSettingsScreen(store: ProviderProfileStore, onBack: () -> Unit) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
                         Button(
                             enabled = !testing,
                             onClick = {
@@ -357,7 +384,7 @@ fun ProviderSettingsScreen(store: ProviderProfileStore, onBack: () -> Unit) {
                             modifier = Modifier.weight(1f).heightIn(min = 48.dp)
                         ) { Text("Save & use", fontWeight = FontWeight.Bold) }
 
-                        OutlinedButton(
+                        OutlinedIconButton(
                             enabled = !testing,
                             onClick = {
                                 scope.launch {
@@ -378,9 +405,12 @@ fun ProviderSettingsScreen(store: ProviderProfileStore, onBack: () -> Unit) {
                                     }
                                 }
                             },
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.heightIn(min = 48.dp)
-                        ) { Text("Test") }
+                            modifier = Modifier
+                                .size(48.dp)
+                                .semantics { contentDescription = "Test connection" }
+                        ) {
+                            Icon(Icons.Default.NetworkCheck, contentDescription = null)
+                        }
                     }
 
                     if (status.isNotBlank()) {

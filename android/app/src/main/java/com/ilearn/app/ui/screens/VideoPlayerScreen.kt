@@ -727,25 +727,24 @@ fun VideoPlayerScreen(
                                         }
                                     }
 
-                                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         if (prevLesson != null) {
-                                            TextButton(
+                                            IconButton(
                                                 onClick = { onNavigateLesson(prevLesson) },
-                                                modifier = Modifier.heightIn(min = 48.dp)
+                                                modifier = Modifier
+                                                    .size(48.dp)
+                                                    .semantics { contentDescription = "الدرس السابق" }
                                             ) {
                                                 Icon(Icons.Default.SkipPrevious, contentDescription = null, tint = Color.White)
-                                                Spacer(modifier = Modifier.width(4.dp))
-                                                Text("السابق", color = Color.White)
                                             }
                                         }
                                         if (nextLesson != null) {
-                                            Button(
+                                            FilledTonalIconButton(
                                                 onClick = { onNavigateLesson(nextLesson) },
-                                                modifier = Modifier.heightIn(min = 48.dp),
-                                                shape = RoundedCornerShape(8.dp)
+                                                modifier = Modifier
+                                                    .size(48.dp)
+                                                    .semantics { contentDescription = "الدرس التالي" }
                                             ) {
-                                                Text("التالي")
-                                                Spacer(modifier = Modifier.width(4.dp))
                                                 Icon(Icons.Default.SkipNext, contentDescription = null)
                                             }
                                         }
@@ -992,66 +991,72 @@ fun VideoPlayerScreen(
                                 .padding(16.dp),
                             verticalArrangement = Arrangement.spacedBy(14.dp)
                         ) {
-                            // Previous / Next Navigation Row
+                            // Previous / Next / Seek / AI Tutor Control Row
                             item {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    horizontalArrangement = Arrangement.SpaceEvenly,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    OutlinedButton(
+                                    IconButton(
                                         onClick = { prevLesson?.let { onNavigateLesson(it) } },
                                         enabled = prevLesson != null,
-                                        modifier = Modifier.heightIn(min = 48.dp),
-                                        colors = ButtonDefaults.outlinedButtonColors(
-                                            contentColor = Color.White,
-                                            disabledContentColor = Color(0xFF475569)
-                                        ),
-                                        shape = RoundedCornerShape(10.dp)
+                                        modifier = Modifier
+                                            .size(48.dp)
+                                            .semantics { contentDescription = "الدرس السابق" }
                                     ) {
-                                        Icon(Icons.Default.SkipPrevious, contentDescription = null, modifier = Modifier.size(18.dp))
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("السابق", fontSize = 13.sp)
+                                        Icon(
+                                            Icons.Default.SkipPrevious,
+                                            contentDescription = null,
+                                            tint = if (prevLesson != null) Color.White else Color(0xFF475569)
+                                        )
                                     }
 
-                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        IconButton(
-                                            onClick = {
-                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                playerController.seekBackward(10000)
-                                            },
-                                            modifier = Modifier
-                                                .size(48.dp)
-                                                .semantics { contentDescription = "تأخير 10 ثوانٍ" }
-                                        ) {
-                                            Icon(Icons.Default.Replay10, contentDescription = null, tint = Color.White)
-                                        }
-                                        IconButton(
-                                            onClick = {
-                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                playerController.seekForward(10000)
-                                            },
-                                            modifier = Modifier
-                                                .size(48.dp)
-                                                .semantics { contentDescription = "تقديم 10 ثوانٍ" }
-                                        ) {
-                                            Icon(Icons.Default.Forward10, contentDescription = null, tint = Color.White)
-                                        }
+                                    IconButton(
+                                        onClick = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            playerController.seekBackward(10000)
+                                        },
+                                        modifier = Modifier
+                                            .size(48.dp)
+                                            .semantics { contentDescription = "تأخير 10 ثوانٍ" }
+                                    ) {
+                                        Icon(Icons.Default.Replay10, contentDescription = null, tint = Color.White)
                                     }
 
-                                    Button(
+                                    FilledTonalIconButton(
+                                        onClick = { onTutor(currentPosition) },
+                                        modifier = Modifier
+                                            .size(48.dp)
+                                            .semantics { contentDescription = "المعلّم الذكي" }
+                                    ) {
+                                        Icon(Icons.Default.SmartToy, contentDescription = null)
+                                    }
+
+                                    IconButton(
+                                        onClick = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            playerController.seekForward(10000)
+                                        },
+                                        modifier = Modifier
+                                            .size(48.dp)
+                                            .semantics { contentDescription = "تقديم 10 ثوانٍ" }
+                                    ) {
+                                        Icon(Icons.Default.Forward10, contentDescription = null, tint = Color.White)
+                                    }
+
+                                    FilledIconButton(
                                         onClick = { nextLesson?.let { onNavigateLesson(it) } },
                                         enabled = nextLesson != null,
-                                        modifier = Modifier.heightIn(min = 48.dp),
-                                        colors = ButtonDefaults.buttonColors(
+                                        modifier = Modifier
+                                            .size(48.dp)
+                                            .semantics { contentDescription = "الدرس التالي" },
+                                        colors = IconButtonDefaults.filledIconButtonColors(
                                             containerColor = MaterialTheme.colorScheme.primary,
                                             disabledContainerColor = Color(0xFF334155)
-                                        ),
-                                        shape = RoundedCornerShape(10.dp)
+                                        )
                                     ) {
-                                        Text("التالي", fontSize = 13.sp)
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Icon(Icons.Default.SkipNext, contentDescription = null, modifier = Modifier.size(18.dp))
+                                        Icon(Icons.Default.SkipNext, contentDescription = null)
                                     }
                                 }
                             }
@@ -1108,11 +1113,6 @@ fun VideoPlayerScreen(
                                 }
                             }
 
-                            item {
-                                FilledTonalButton(onClick = { onTutor(currentPosition) }, modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
-                                    Text("AI tutor • المعلّم")
-                                }
-                            }
                             // Study Notes Header & Add Box
                             item {
                                 StudyNotesSection(

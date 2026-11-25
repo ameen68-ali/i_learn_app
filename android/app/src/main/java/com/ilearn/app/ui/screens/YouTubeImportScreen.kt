@@ -133,30 +133,66 @@ fun YouTubeImportScreen(
                 }
             }
 
-            OutlinedTextField(
-                value = url,
-                onValueChange = { url = it.take(2000); preview = null; errorMessage = null; statusMessage = null },
-                label = { Text("رابط قائمة التشغيل • YouTube playlist link") },
-                placeholder = { Text("https://www.youtube.com/playlist?list=...") },
-                leadingIcon = { Icon(Icons.Default.Link, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-                trailingIcon = {
-                    if (url.isNotEmpty() && !busy) {
-                        IconButton(onClick = { url = ""; preview = null; errorMessage = null; statusMessage = null }) {
-                            Icon(Icons.Default.Close, contentDescription = "مسح الرابط")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedTextField(
+                    value = url,
+                    onValueChange = { url = it.take(2000); preview = null; errorMessage = null; statusMessage = null },
+                    label = { Text("رابط قائمة التشغيل • YouTube playlist") },
+                    placeholder = { Text("https://www.youtube.com/playlist?list=...") },
+                    leadingIcon = { Icon(Icons.Default.Link, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+                    trailingIcon = {
+                        if (url.isNotEmpty() && !busy) {
+                            IconButton(onClick = { url = ""; preview = null; errorMessage = null; statusMessage = null }) {
+                                Icon(Icons.Default.Close, contentDescription = "مسح الرابط")
+                            }
                         }
-                    }
-                },
-                supportingText = {
-                    if (url.isNotBlank() && parsedPlaylistId == null) {
-                        Text("أدخل رابط قائمة تشغيل YouTube صحيح بصيغة HTTPS يحتوي على list=", color = MaterialTheme.colorScheme.error)
-                    }
-                },
-                isError = url.isNotBlank() && parsedPlaylistId == null,
-                singleLine = true,
-                enabled = !busy,
-                shape = RoundedCornerShape(14.dp),
-                modifier = Modifier.fillMaxWidth()
-            )
+                    },
+                    supportingText = {
+                        if (url.isNotBlank() && parsedPlaylistId == null) {
+                            Text("أدخل رابط قائمة تشغيل YouTube صحيح بصيغة HTTPS يحتوي على list=", color = MaterialTheme.colorScheme.error)
+                        }
+                    },
+                    isError = url.isNotBlank() && parsedPlaylistId == null,
+                    singleLine = true,
+                    enabled = !busy,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.weight(1f)
+                )
+
+                FilledIconButton(
+                    enabled = !busy && apiKey.isNotBlank() && parsedPlaylistId != null,
+                    onClick = {
+                        job = scope.launch {
+                            busy = true
+                            errorMessage = null
+                            statusMessage = "جاري جلب بيانات قائمة التشغيل…"
+                            preview = null
+                            try {
+                                preview = YouTubeMetadataClient(context).preview(url, apiKey)
+                                statusMessage = "راجِع الدروس قبل إضافتها للمكتبة"
+                            } catch (e: CancellationException) {
+                                statusMessage = "تم إلغاء المعاينة"
+                                throw e
+                            } catch (e: Exception) {
+                                statusMessage = null
+                                errorMessage = e.message ?: "تعذّر تحميل قائمة التشغيل"
+                            } finally {
+                                busy = false
+                            }
+                        }
+                    },
+                    modifier = Modifier
+                        .padding(top = 6.dp)
+                        .size(52.dp)
+                        .semantics { contentDescription = "معاينة الكورس" }
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.PlaylistPlay, contentDescription = null)
+                }
+            }
 
             if (!hasBuiltInApiKey) {
                 OutlinedTextField(
@@ -177,36 +213,6 @@ fun YouTubeImportScreen(
                 )
             }
 
-            Button(
-                enabled = !busy && apiKey.isNotBlank() && parsedPlaylistId != null,
-                onClick = {
-                    job = scope.launch {
-                        busy = true
-                        errorMessage = null
-                        statusMessage = "جاري جلب بيانات قائمة التشغيل…"
-                        preview = null
-                        try {
-                            preview = YouTubeMetadataClient(context).preview(url, apiKey)
-                            statusMessage = "راجِع الدروس قبل إضافتها للمكتبة"
-                        } catch (e: CancellationException) {
-                            statusMessage = "تم إلغاء المعاينة"
-                            throw e
-                        } catch (e: Exception) {
-                            statusMessage = null
-                            errorMessage = e.message ?: "تعذّر تحميل قائمة التشغيل"
-                        } finally {
-                            busy = false
-                        }
-                    }
-                },
-                shape = RoundedCornerShape(14.dp),
-                modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)
-            ) {
-                Icon(Icons.AutoMirrored.Filled.PlaylistPlay, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("معاينة الكورس • Preview playlist", fontWeight = FontWeight.Bold)
-            }
-
             if (busy) {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)))
@@ -220,7 +226,14 @@ fun YouTubeImportScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        TextButton(onClick = { job?.cancel() }) { Text("إلغاء") }
+                        IconButton(
+                            onClick = { job?.cancel() },
+                            modifier = Modifier
+                                .size(40.dp)
+                                .semantics { contentDescription = "إلغاء المعاينة" }
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                        }
                     }
                 }
             } else if (!statusMessage.isNullOrBlank()) {
@@ -252,11 +265,47 @@ fun YouTubeImportScreen(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text(
-                            text = result.course.title,
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = result.course.title,
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.weight(1f)
+                            )
+                            FilledIconButton(
+                                enabled = !busy,
+                                onClick = {
+                                    job = scope.launch {
+                                        busy = true
+                                        errorMessage = null
+                                        try {
+                                            val existing = repository.courses.value.firstOrNull { it.id == result.course.id }
+                                            repository.dbHelper.insertCourseWithLessons(
+                                                result.course.copy(dateAdded = existing?.dateAdded ?: result.course.dateAdded),
+                                                result.lessons
+                                            )
+                                            repository.refreshData()
+                                            onImported(result.course.id)
+                                        } catch (e: CancellationException) {
+                                            throw e
+                                        } catch (e: Exception) {
+                                            errorMessage = "تعذّر حفظ الكورس: ${e.message}"
+                                        } finally {
+                                            busy = false
+                                        }
+                                    }
+                                },
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .semantics { contentDescription = "إضافة أو تحديث الكورس" }
+                            ) {
+                                Icon(Icons.Default.Check, contentDescription = null)
+                            }
+                        }
 
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             val availableCount = result.lessons.count { it.isAvailable }
@@ -329,39 +378,6 @@ fun YouTubeImportScreen(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                        }
-
-                        Spacer(modifier = Modifier.height(4.dp))
-
-                        Button(
-                            enabled = !busy,
-                            onClick = {
-                                job = scope.launch {
-                                    busy = true
-                                    errorMessage = null
-                                    try {
-                                        val existing = repository.courses.value.firstOrNull { it.id == result.course.id }
-                                        repository.dbHelper.insertCourseWithLessons(
-                                            result.course.copy(dateAdded = existing?.dateAdded ?: result.course.dateAdded),
-                                            result.lessons
-                                        )
-                                        repository.refreshData()
-                                        onImported(result.course.id)
-                                    } catch (e: CancellationException) {
-                                        throw e
-                                    } catch (e: Exception) {
-                                        errorMessage = "تعذّر حفظ الكورس: ${e.message}"
-                                    } finally {
-                                        busy = false
-                                    }
-                                }
-                            },
-                            shape = RoundedCornerShape(14.dp),
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)
-                        ) {
-                            Icon(Icons.Default.CheckCircleOutline, contentDescription = null)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("إضافة / تحديث الكورس • Add / refresh course", fontWeight = FontWeight.Bold)
                         }
                     }
                 }
