@@ -25,6 +25,8 @@ class LessonSourceStore(private val context: Context) {
         val attached = file(lesson, "source.json")
         read(attached)?.let { return JSONObject(it).optString("label").takeIf { l -> l.isNotBlank() } }
         return when {
+            !lesson.subArPath.isNullOrBlank() && File(lesson.subArPath).isFile &&
+                !lesson.subEnPath.isNullOrBlank() && File(lesson.subEnPath).isFile -> "Arabic & English subtitles"
             !lesson.subArPath.isNullOrBlank() && File(lesson.subArPath).isFile -> "Arabic subtitle"
             !lesson.subEnPath.isNullOrBlank() && File(lesson.subEnPath).isFile -> "English subtitle"
             else -> null

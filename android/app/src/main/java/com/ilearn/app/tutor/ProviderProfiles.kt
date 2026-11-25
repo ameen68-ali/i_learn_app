@@ -4,6 +4,9 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URI
@@ -48,9 +51,12 @@ class ProviderProfileStore(context: Context) {
         runCatching { JSONObject(android.util.AtomicFile(file).readFully().toString(Charsets.UTF_8)).also { it.getJSONArray("profiles") } }
             .getOrElse { loadWarning = "Saved API profiles could not be read. Re-create the profiles before using the tutor."; JSONObject().put("profiles", JSONArray()) }
     } else JSONObject().put("profiles", JSONArray())
+    private val _updates = MutableStateFlow(0)
+    val updates: StateFlow<Int> = _updates.asStateFlow()
+
     var activeId: String?
         get() = root.optString("active").takeIf { it.isNotBlank() }
-        set(value) { root.put("active", value); persist() }
+        set(value) { root.put("active", value); persist(); _updates.value++ }
 
     @Synchronized fun profiles(): List<ProviderProfile> = (0 until root.getJSONArray("profiles").length()).map { i ->
         root.getJSONArray("profiles").getJSONObject(i).let { p ->
@@ -58,6 +64,7 @@ class ProviderProfileStore(context: Context) {
         }
     }
     fun active(): ProviderProfile? = profiles().firstOrNull { it.id == activeId }
+    fun isConfigured(): Boolean = active()?.let { key(it) != null } == true
     @Synchronized fun save(profile: ProviderProfile, key: String, remember: Boolean) {
         profile.validate(); requireApiKey(key)
         val entries = root.getJSONArray("profiles")
@@ -68,7 +75,7 @@ class ProviderProfileStore(context: Context) {
             .put("endpoint", profile.endpoint.trimEnd('/')).put("model", profile.model).put("output", profile.maxOutputTokens)
             .put("context", profile.contextChars).put("stream", profile.stream).put("version", profile.apiVersion).put("modernChatTokens", profile.modernChatTokens)
         if (remember) p.put("secret", encrypt(key, profile))
-        next.put(p); sessions[profile.id] = key; root.put("profiles", next).put("active", profile.id); persist(); loadWarning = null
+        next.put(p); sessions[profile.id] = key; root.put("profiles", next).put("active", profile.id); persist(); loadWarning = null; _updates.value++
     }
     @Synchronized fun key(profile: ProviderProfile): String? {
         // Match the complete saved destination: editing an endpoint must never reuse an old key.
@@ -85,6 +92,7 @@ class ProviderProfileStore(context: Context) {
         root.put("profiles", next); sessions.remove(id)
         if (activeId == id) root.remove("active")
         persist()
+        _updates.value++
     }
     private fun persist() {
         val atomic = android.util.AtomicFile(file)

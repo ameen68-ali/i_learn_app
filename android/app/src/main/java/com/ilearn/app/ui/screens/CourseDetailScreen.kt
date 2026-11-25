@@ -66,19 +66,30 @@ fun CourseDetailScreen(
     onCancelDownload: (String) -> Unit = {},
     onRemoveOfflineLesson: (Lesson) -> Unit = {},
     onDismissDownloadError: (String) -> Unit = {},
-    onExportOfflineCourse: suspend (Uri, (Float, String) -> Unit) -> Unit = { _, _ -> }
+    onExportOfflineCourse: suspend (Uri, (Float, String) -> Unit) -> Unit = { _, _ -> },
+    hasConfiguredAi: Boolean = false,
+    lessonTranslations: Map<String, LessonDownloadState> = emptyMap(),
+    translationErrors: Map<String, String> = emptyMap(),
+    onTranslateLessonToArabic: (Lesson) -> Unit = {},
+    onCancelTranslation: (String) -> Unit = {},
+    onDismissTranslationError: (String) -> Unit = {},
+    onTranslateCourseToArabic: (List<Lesson>) -> Unit = {}
 ) {
     var selectedFilter by remember { mutableStateOf(LessonFilter.ALL) }
     var searchQuery by remember { mutableStateOf("") }
     var showCelebrationDialog by remember { mutableStateOf(false) }
     var hasAutoShownCelebration by remember { mutableStateOf(false) }
     var lessonToDeleteOffline by remember { mutableStateOf<Lesson?>(null) }
+    var showTranslateAllConfirm by remember { mutableStateOf(false) }
     var exportProgress by remember { mutableStateOf<Float?>(null) }
     var exportCurrentLabel by remember { mutableStateOf("") }
     var exportJob by remember { mutableStateOf<Job?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val canExportCourse = remember(lessons) { CourseArchiveExporter.canExportOfflineCourse(lessons) }
+    val translatableLessons = remember(lessons) {
+        lessons.filter { !it.hasArabicSubtitles && it.hasEnglishSubtitles }
+    }
 
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/zip")
@@ -115,6 +126,14 @@ fun CourseDetailScreen(
         if (firstEntry != null) {
             snackbarHostState.showSnackbar(firstEntry.value, duration = SnackbarDuration.Long)
             onDismissDownloadError(firstEntry.key)
+        }
+    }
+
+    LaunchedEffect(translationErrors) {
+        val firstEntry = translationErrors.entries.firstOrNull()
+        if (firstEntry != null) {
+            snackbarHostState.showSnackbar(firstEntry.value, duration = SnackbarDuration.Long)
+            onDismissTranslationError(firstEntry.key)
         }
     }
 
@@ -233,6 +252,36 @@ fun CourseDetailScreen(
         )
     }
 
+    if (showTranslateAllConfirm) {
+        AlertDialog(
+            onDismissRequest = { showTranslateAllConfirm = false },
+            icon = { Icon(Icons.Default.Translate, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+            title = { Text("ترجمة النصوص الإنجليزية للعربية", fontWeight = FontWeight.Bold) },
+            text = {
+                Text("يوجد ${translatableLessons.size} درساً بنص إنجليزي فقط بدون ترجمة عربية. هل تريد استخدام مزوّد الذكاء الاصطناعي لإنتاج ملفات ترجمة عربية متزامنة (.vtt) لجميع هذه الدروس؟")
+            },
+            confirmButton = {
+                IconButton(
+                    onClick = {
+                        onTranslateCourseToArabic(translatableLessons)
+                        showTranslateAllConfirm = false
+                    },
+                    modifier = Modifier.semantics { contentDescription = "تأكيد ترجمة كل الدروس" }
+                ) {
+                    Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                }
+            },
+            dismissButton = {
+                IconButton(
+                    onClick = { showTranslateAllConfirm = false },
+                    modifier = Modifier.semantics { contentDescription = "إلغاء" }
+                ) {
+                    Icon(Icons.Default.Close, contentDescription = null)
+                }
+            }
+        )
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
@@ -256,6 +305,16 @@ fun CourseDetailScreen(
                     }
                 },
                 actions = {
+                    if (hasConfiguredAi && translatableLessons.isNotEmpty()) {
+                        IconButton(
+                            onClick = { showTranslateAllConfirm = true },
+                            modifier = Modifier
+                                .size(48.dp)
+                                .semantics { contentDescription = "ترجمة النصوص الإنجليزية للعربية بالذكاء الاصطناعي" }
+                        ) {
+                            Icon(Icons.Default.Translate, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        }
+                    }
                     if (canExportCourse) {
                         IconButton(
                             onClick = {
@@ -485,12 +544,16 @@ fun CourseDetailScreen(
                 LessonItemCard(
                     lesson = lesson,
                     downloadState = lessonDownloads[lesson.id],
+                    translationState = lessonTranslations[lesson.id],
+                    canTranslateToArabic = hasConfiguredAi && !lesson.hasArabicSubtitles && lesson.hasEnglishSubtitles,
                     onClick = { onSelectLesson(lesson) },
                     onToggleComplete = { completed -> onToggleLessonCompleted(lesson, completed) },
                     onToggleBookmark = { bookmarked -> onToggleLessonBookmarked(lesson, bookmarked) },
                     onDownloadClick = { onDownloadLesson(lesson) },
                     onCancelDownload = { onCancelDownload(lesson.id) },
-                    onRequestRemoveOffline = { lessonToDeleteOffline = lesson }
+                    onRequestRemoveOffline = { lessonToDeleteOffline = lesson },
+                    onTranslateToArabic = { onTranslateLessonToArabic(lesson) },
+                    onCancelTranslation = { onCancelTranslation(lesson.id) }
                 )
             }
 
@@ -573,9 +636,13 @@ fun LessonItemCard(
     onToggleComplete: (Boolean) -> Unit,
     onToggleBookmark: (Boolean) -> Unit,
     downloadState: LessonDownloadState? = null,
+    translationState: LessonDownloadState? = null,
+    canTranslateToArabic: Boolean = false,
     onDownloadClick: () -> Unit = {},
     onCancelDownload: () -> Unit = {},
-    onRequestRemoveOffline: () -> Unit = {}
+    onRequestRemoveOffline: () -> Unit = {},
+    onTranslateToArabic: () -> Unit = {},
+    onCancelTranslation: () -> Unit = {}
 ) {
     val haptic = LocalHapticFeedback.current
 
@@ -727,6 +794,9 @@ fun LessonItemCard(
                 Spacer(modifier = Modifier.width(8.dp))
 
                 // Compact 2x2 action icon grid keeps the card spacious and uncluttered
+                val hasYoutubeDownload = lesson.sourceType == SourceType.YOUTUBE && lesson.isAvailable && lesson.remoteId != null
+                val iconCellSize = if (hasYoutubeDownload && (canTranslateToArabic || translationState != null)) 40.dp else 44.dp
+
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(2.dp)
@@ -742,7 +812,7 @@ fun LessonItemCard(
                                 onToggleBookmark(!lesson.isBookmarked)
                             },
                             modifier = Modifier
-                                .size(44.dp)
+                                .size(iconCellSize)
                                 .semantics {
                                     contentDescription = if (lesson.isBookmarked) "إزالة من المفضلة" else "إضافة إلى المفضلة"
                                 }
@@ -756,19 +826,19 @@ fun LessonItemCard(
                         }
 
                         // Offline 360p Download / Cancel / Delete IconButton
-                        if (lesson.sourceType == SourceType.YOUTUBE && lesson.isAvailable && lesson.remoteId != null) {
+                        if (hasYoutubeDownload) {
                             when {
                                 downloadState != null -> {
-                                    Box(modifier = Modifier.size(44.dp), contentAlignment = Alignment.Center) {
+                                    Box(modifier = Modifier.size(iconCellSize), contentAlignment = Alignment.Center) {
                                         CircularProgressIndicator(
                                             progress = { downloadState.progress.coerceIn(0f, 1f) },
-                                            modifier = Modifier.size(30.dp),
+                                            modifier = Modifier.size(28.dp),
                                             strokeWidth = 2.5.dp
                                         )
                                         IconButton(
                                             onClick = onCancelDownload,
                                             modifier = Modifier
-                                                .size(44.dp)
+                                                .size(iconCellSize)
                                                 .semantics { contentDescription = "إلغاء التحميل" }
                                         ) {
                                             Icon(
@@ -784,7 +854,7 @@ fun LessonItemCard(
                                     IconButton(
                                         onClick = onRequestRemoveOffline,
                                         modifier = Modifier
-                                            .size(44.dp)
+                                            .size(iconCellSize)
                                             .semantics { contentDescription = "محمّل أوفلاين 360p - انقر لحذف التحميل" }
                                     ) {
                                         Icon(
@@ -799,7 +869,7 @@ fun LessonItemCard(
                                     IconButton(
                                         onClick = onDownloadClick,
                                         modifier = Modifier
-                                            .size(44.dp)
+                                            .size(iconCellSize)
                                             .semantics { contentDescription = "تحميل أوفلاين (360p) مع الترجمة" }
                                     ) {
                                         Icon(
@@ -810,6 +880,45 @@ fun LessonItemCard(
                                         )
                                     }
                                 }
+                            }
+                        }
+
+                        // AI English -> Arabic Subtitle Translation IconButton
+                        if (translationState != null) {
+                            Box(modifier = Modifier.size(iconCellSize), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(
+                                    progress = { translationState.progress.coerceIn(0f, 1f) },
+                                    color = MaterialTheme.colorScheme.secondary,
+                                    modifier = Modifier.size(28.dp),
+                                    strokeWidth = 2.5.dp
+                                )
+                                IconButton(
+                                    onClick = onCancelTranslation,
+                                    modifier = Modifier
+                                        .size(iconCellSize)
+                                        .semantics { contentDescription = "إلغاء الترجمة العربية" }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        } else if (canTranslateToArabic) {
+                            IconButton(
+                                onClick = onTranslateToArabic,
+                                modifier = Modifier
+                                    .size(iconCellSize)
+                                    .semantics { contentDescription = "ترجمة النص الإنجليزي للعربية بالذكاء الاصطناعي" }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Translate,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.secondary,
+                                    modifier = Modifier.size(21.dp)
+                                )
                             }
                         }
                     }
@@ -858,7 +967,8 @@ fun LessonItemCard(
                 }
             }
 
-            if (downloadState != null) {
+            val activeProgress = translationState ?: downloadState
+            if (activeProgress != null) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -866,24 +976,25 @@ fun LessonItemCard(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = downloadState.stage,
+                        text = activeProgress.stage,
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = if (translationState != null) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "${(downloadState.progress * 100).toInt()}%",
+                        text = "${(activeProgress.progress * 100).toInt()}%",
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
+                        color = if (translationState != null) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary
                     )
                 }
                 Spacer(modifier = Modifier.height(4.dp))
                 LinearProgressIndicator(
-                    progress = { downloadState.progress.coerceIn(0f, 1f) },
+                    progress = { activeProgress.progress.coerceIn(0f, 1f) },
+                    color = if (translationState != null) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary,
                     modifier = Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(3.dp))
                 )
             }

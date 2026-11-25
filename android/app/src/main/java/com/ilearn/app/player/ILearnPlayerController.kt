@@ -147,7 +147,7 @@ class ILearnPlayerController(private val context: Context) {
         activeLesson?.let { loadLesson(it) }
     }
 
-    fun loadLesson(lesson: Lesson) {
+    fun loadLesson(lesson: Lesson, overridePositionMs: Long? = null) {
         activeLesson = lesson
         _currentSubtitles.value = null
         _playerError.value = null
@@ -240,9 +240,11 @@ class ILearnPlayerController(private val context: Context) {
         // Apply preferred subtitle language
         applySubtitleMode(_subtitleMode.value)
 
-        // Resume playback if student previously watched part of this lesson
-        if (lesson.lastPositionMs > 1000L && !lesson.isCompleted) {
-            exoPlayer.seekTo(lesson.lastPositionMs)
+        // Resume playback if reloading at explicit position or if student previously watched part of this lesson
+        val targetPositionMs = overridePositionMs?.coerceAtLeast(0L)
+            ?: if (lesson.lastPositionMs > 1000L && !lesson.isCompleted) lesson.lastPositionMs else 0L
+        if (targetPositionMs > 0L) {
+            exoPlayer.seekTo(targetPositionMs)
         }
     }
 

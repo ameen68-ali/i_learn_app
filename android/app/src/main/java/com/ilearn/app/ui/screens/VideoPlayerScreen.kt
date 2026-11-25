@@ -66,6 +66,7 @@ import com.ilearn.app.ui.components.ContextualEmptyState
 import com.ilearn.app.ui.components.FileUploadBottomSheet
 import com.ilearn.app.ui.components.GestureTutorialOverlay
 import com.ilearn.app.utils.AudioExtractorHelper
+import com.ilearn.app.youtube.LessonDownloadState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
@@ -104,7 +105,13 @@ fun VideoPlayerScreen(
     onDeleteNote: (noteId: String) -> Unit,
     onExtractAudio: suspend (Lesson) -> File?,
     onAttachArabicAudio: suspend (Lesson, Uri) -> Boolean,
-    onRemoveArabicAudio: suspend (Lesson) -> Boolean
+    onRemoveArabicAudio: suspend (Lesson) -> Boolean,
+    hasConfiguredAi: Boolean = false,
+    translationState: LessonDownloadState? = null,
+    translationError: String? = null,
+    onTranslateSubtitlesToArabic: () -> Unit = {},
+    onCancelTranslation: () -> Unit = {},
+    onDismissTranslationError: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val playbackSession = remember(lesson.id) { com.ilearn.app.player.LocalPlaybackSession(playerController, lesson) }
@@ -235,9 +242,23 @@ fun VideoPlayerScreen(
         }
     }
 
-    // Load active lesson when it changes
-    LaunchedEffect(lesson.id, lesson.audioArPath) {
-        playerController.loadLesson(lesson)
+    LaunchedEffect(translationError) {
+        if (!translationError.isNullOrBlank()) {
+            snackbarHostState.showSnackbar(translationError, duration = SnackbarDuration.Long)
+            onDismissTranslationError()
+        }
+    }
+
+    // Load active lesson when it changes or when subtitles/dubbing update live
+    LaunchedEffect(lesson.id, lesson.audioArPath, lesson.subArPath) {
+        val sameLessonReload = playerController.activeLessonId == lesson.id && currentPosition > 0L
+        if (sameLessonReload && lesson.hasArabicSubtitles) {
+            playerController.setSubtitleMode(SubtitleMode.ARABIC)
+        }
+        playerController.loadLesson(
+            lesson = lesson,
+            overridePositionMs = if (sameLessonReload) currentPosition else null
+        )
     }
 
     // Periodic progress saver
@@ -1080,6 +1101,36 @@ fun VideoPlayerScreen(
                                         Icon(Icons.Default.SmartToy, contentDescription = null)
                                     }
 
+                                    if (hasConfiguredAi && !lesson.hasArabicSubtitles && lesson.hasEnglishSubtitles) {
+                                        if (translationState != null) {
+                                            Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                                                CircularProgressIndicator(
+                                                    progress = { translationState.progress.coerceIn(0f, 1f) },
+                                                    color = Color(0xFF38BDF8),
+                                                    strokeWidth = 2.5.dp,
+                                                    modifier = Modifier.size(32.dp)
+                                                )
+                                                IconButton(
+                                                    onClick = onCancelTranslation,
+                                                    modifier = Modifier
+                                                        .size(48.dp)
+                                                        .semantics { contentDescription = "إلغاء الترجمة العربية" }
+                                                ) {
+                                                    Icon(Icons.Default.Close, contentDescription = null, tint = Color(0xFFFCA5A5), modifier = Modifier.size(16.dp))
+                                                }
+                                            }
+                                        } else {
+                                            FilledTonalIconButton(
+                                                onClick = onTranslateSubtitlesToArabic,
+                                                modifier = Modifier
+                                                    .size(48.dp)
+                                                    .semantics { contentDescription = "ترجمة النص الإنجليزي للعربية بالذكاء الاصطناعي" }
+                                            ) {
+                                                Icon(Icons.Default.Translate, contentDescription = null)
+                                            }
+                                        }
+                                    }
+
                                     IconButton(
                                         onClick = {
                                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -1104,6 +1155,45 @@ fun VideoPlayerScreen(
                                         )
                                     ) {
                                         Icon(Icons.Default.SkipNext, contentDescription = null)
+                                    }
+                                }
+                            }
+
+                            translationState?.let { tr ->
+                                item {
+                                    Surface(
+                                        color = Color(0xFF0F172A),
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(12.dp),
+                                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = tr.stage,
+                                                    color = Color.White,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                Text(
+                                                    text = "${(tr.progress * 100).toInt()}%",
+                                                    color = Color(0xFF38BDF8),
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                            LinearProgressIndicator(
+                                                progress = { tr.progress.coerceIn(0f, 1f) },
+                                                color = Color(0xFF38BDF8),
+                                                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(3.dp))
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -1428,6 +1518,53 @@ fun VideoPlayerScreen(
                                                 style = MaterialTheme.typography.bodyMedium,
                                                 fontWeight = if (subtitleMode == mode) FontWeight.Bold else FontWeight.Normal
                                             )
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (hasConfiguredAi && !lesson.hasArabicSubtitles && lesson.hasEnglishSubtitles) {
+                                Surface(
+                                    color = MaterialTheme.colorScheme.secondaryContainer,
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Text(
+                                            text = translationState?.stage
+                                                ?: "تتوفر ترجمة إنجليزية فقط — أنتج نسخة عربية بالذكاء الاصطناعي",
+                                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        if (translationState != null) {
+                                            IconButton(
+                                                onClick = onCancelTranslation,
+                                                modifier = Modifier.size(44.dp).semantics { contentDescription = "إلغاء الترجمة العربية" }
+                                            ) {
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    CircularProgressIndicator(
+                                                        progress = { translationState.progress.coerceIn(0f, 1f) },
+                                                        strokeWidth = 2.5.dp,
+                                                        modifier = Modifier.size(28.dp)
+                                                    )
+                                                    Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(14.dp))
+                                                }
+                                            }
+                                        } else {
+                                            FilledTonalIconButton(
+                                                onClick = {
+                                                    onTranslateSubtitlesToArabic()
+                                                    showSubtitleDialog = false
+                                                },
+                                                modifier = Modifier.size(44.dp).semantics { contentDescription = "ترجمة الإنجليزية للعربية بالذكاء الاصطناعي" }
+                                            ) {
+                                                Icon(Icons.Default.Translate, contentDescription = null)
+                                            }
                                         }
                                     }
                                 }

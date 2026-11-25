@@ -44,8 +44,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        repository = CourseRepository(this)
         providerProfiles = ProviderProfileStore(this)
+        repository = CourseRepository(this, providerProfiles)
         playerController = ILearnPlayerController(this)
 
         // Initial fetch of courses and progress
@@ -66,6 +66,10 @@ class MainActivity : ComponentActivity() {
                         val dbUpdates by repository.dbHelper.databaseUpdates.collectAsState()
                         val lessonDownloads by repository.lessonDownloads.collectAsState()
                         val lessonDownloadErrors by repository.lessonDownloadErrors.collectAsState()
+                        val translatingLessons by repository.translatingLessons.collectAsState()
+                        val translationErrors by repository.translationErrors.collectAsState()
+                        val providerUpdates by providerProfiles.updates.collectAsState()
+                        val hasConfiguredAi = remember(providerUpdates) { repository.hasConfiguredAi() }
 
                         NavHost(navController = navController, startDestination = "catalog") {
                             // 1. Home / Course Catalog Screen (Zero preloaded, direct view, stats & backup)
@@ -186,6 +190,21 @@ class MainActivity : ComponentActivity() {
                                         },
                                         onExportOfflineCourse = { targetUri, onProgress ->
                                             repository.exportOfflineCourseZip(currentCourse, lessons, targetUri, onProgress)
+                                        },
+                                        hasConfiguredAi = hasConfiguredAi,
+                                        lessonTranslations = translatingLessons,
+                                        translationErrors = translationErrors,
+                                        onTranslateLessonToArabic = { lesson ->
+                                            repository.startLessonArabicTranslation(lesson)
+                                        },
+                                        onCancelTranslation = { lessonId ->
+                                            repository.cancelTranslation(lessonId)
+                                        },
+                                        onDismissTranslationError = { lessonId ->
+                                            repository.dismissTranslationError(lessonId)
+                                        },
+                                        onTranslateCourseToArabic = { translatable ->
+                                            repository.startCourseArabicTranslation(translatable)
                                         }
                                     )
                                 }
@@ -226,6 +245,12 @@ class MainActivity : ComponentActivity() {
                                             onDownloadOffline = { repository.startYouTubeLessonDownload(lesson) },
                                             onCancelDownload = { repository.cancelYouTubeLessonDownload(lesson.id) },
                                             onDismissDownloadError = { repository.dismissDownloadError(lesson.id) },
+                                            hasConfiguredAi = hasConfiguredAi,
+                                            translationState = translatingLessons[lesson.id],
+                                            translationError = translationErrors[lesson.id],
+                                            onTranslateToArabic = { repository.startLessonArabicTranslation(lesson) },
+                                            onCancelTranslation = { repository.cancelTranslation(lesson.id) },
+                                            onDismissTranslationError = { repository.dismissTranslationError(lesson.id) },
                                             onBack = { navController.popBackStack() },
                                             onNavigate = { target -> navController.navigate("player/${target.courseId}/${target.id}") { popUpTo("player/{courseId}/{lessonId}") { inclusive = true } } },
                                             onProgress = { pos, dur -> lifecycleScope.launch { repository.updateLessonProgress(lesson.id, lesson.courseId, pos, dur) } },
@@ -303,13 +328,30 @@ class MainActivity : ComponentActivity() {
                                                 activeLesson = allLessons.firstOrNull { it.id == targetLesson.id }
                                             }
                                             success
-                                        }
+                                        },
+                                        hasConfiguredAi = hasConfiguredAi,
+                                        translationState = translatingLessons[lesson.id],
+                                        translationError = translationErrors[lesson.id],
+                                        onTranslateSubtitlesToArabic = { repository.startLessonArabicTranslation(lesson) },
+                                        onCancelTranslation = { repository.cancelTranslation(lesson.id) },
+                                        onDismissTranslationError = { repository.dismissTranslationError(lesson.id) }
                                     )
                                     tutorPosition?.let { position ->
-                                        TutorDialog(lesson, position, providerProfiles,
+                                        TutorDialog(
+                                            lesson = lesson,
+                                            positionMs = position,
+                                            profiles = providerProfiles,
+                                            translationState = translatingLessons[lesson.id],
+                                            translationError = translationErrors[lesson.id],
+                                            onTranslateToArabic = if (hasConfiguredAi && !lesson.hasArabicSubtitles) {
+                                                { repository.startLessonArabicTranslation(lesson) }
+                                            } else null,
+                                            onCancelTranslation = { repository.cancelTranslation(lesson.id) },
+                                            onDismissTranslationError = { repository.dismissTranslationError(lesson.id) },
                                             onSeek = { playerController.seekTo(it); tutorPosition = null },
                                             onSettings = { navController.navigate("api_settings") },
-                                            onClose = { tutorPosition = null })
+                                            onClose = { tutorPosition = null }
+                                        )
                                     }
                                 }
                             }

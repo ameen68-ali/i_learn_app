@@ -5,25 +5,39 @@ import android.net.Uri
 import com.ilearn.app.importer.CourseArchiveExporter
 import com.ilearn.app.importer.CourseArchiveImporter
 import com.ilearn.app.importer.ImportState
+import com.ilearn.app.tutor.ArabicSubtitleTranslator
+import com.ilearn.app.tutor.LessonSourceStore
+import com.ilearn.app.tutor.ProviderProfileStore
 import com.ilearn.app.utils.AudioExtractorHelper
 import com.ilearn.app.youtube.LessonDownloadState
 import com.ilearn.app.youtube.YouTubeOfflineDownloader
+import com.ilearn.app.youtube.YouTubeTranscriptClient
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 
-class CourseRepository(private val context: Context) {
+class CourseRepository(
+    private val context: Context,
+    val providerProfiles: ProviderProfileStore = ProviderProfileStore(context)
+) {
 
     val dbHelper = CourseDatabaseHelper(context)
     val importer = CourseArchiveImporter(context, dbHelper)
     private val youtubeDownloader = YouTubeOfflineDownloader(context, dbHelper)
+    private val transcriptClient = YouTubeTranscriptClient()
 
-    private val scope = CoroutineScope(Dispatchers.IO)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val translationJobs = ConcurrentHashMap<String, Job>()
 
     private val _courses = MutableStateFlow<List<Course>>(emptyList())
     val courses: StateFlow<List<Course>> = _courses.asStateFlow()
@@ -37,6 +51,12 @@ class CourseRepository(private val context: Context) {
     val importState: StateFlow<ImportState> = importer.importState
     val lessonDownloads: StateFlow<Map<String, LessonDownloadState>> = youtubeDownloader.downloads
     val lessonDownloadErrors: StateFlow<Map<String, String>> = youtubeDownloader.errors
+
+    private val _translatingLessons = MutableStateFlow<Map<String, LessonDownloadState>>(emptyMap())
+    val translatingLessons: StateFlow<Map<String, LessonDownloadState>> = _translatingLessons.asStateFlow()
+
+    private val _translationErrors = MutableStateFlow<Map<String, String>>(emptyMap())
+    val translationErrors: StateFlow<Map<String, String>> = _translationErrors.asStateFlow()
 
     init {
         // Listen to database updates reactively
@@ -191,6 +211,135 @@ class CourseRepository(private val context: Context) {
         onProgress: (Float, String) -> Unit = { _, _ -> }
     ) {
         CourseArchiveExporter.exportCourseToZip(context, course, lessons, targetUri, onProgress)
+    }
+
+    fun hasConfiguredAi(): Boolean = providerProfiles.isConfigured()
+
+    fun dismissTranslationError(lessonId: String) {
+        _translationErrors.update { it - lessonId }
+    }
+
+    fun cancelTranslation(lessonId: String) {
+        translationJobs.remove(lessonId)?.cancel()
+        _translatingLessons.update { it - lessonId }
+    }
+
+    fun startLessonArabicTranslation(lesson: Lesson) {
+        if (translationJobs.containsKey(lesson.id)) return
+        dismissTranslationError(lesson.id)
+        _translatingLessons.update {
+            it + (lesson.id to LessonDownloadState(lesson.id, 0f, "تجهيز الترجمة العربية بالذكاء الاصطناعي…"))
+        }
+        val job = scope.launch {
+            try {
+                translateLessonToArabicInternal(lesson) { progress, stage ->
+                    _translatingLessons.update {
+                        if (lesson.id !in it && progress <= 0f) it
+                        else it + (lesson.id to LessonDownloadState(lesson.id, progress, stage))
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                val msg = e.message?.take(220).orEmpty().ifBlank { "تعذّرت ترجمة النص للعربية" }
+                _translationErrors.update { it + (lesson.id to msg) }
+            } finally {
+                translationJobs.remove(lesson.id)
+                _translatingLessons.update { it - lesson.id }
+            }
+        }
+        translationJobs[lesson.id] = job
+    }
+
+    fun startCourseArabicTranslation(lessons: List<Lesson>) {
+        lessons.filter { !it.hasArabicSubtitles && it.hasEnglishSubtitles }.forEach { lesson ->
+            startLessonArabicTranslation(lesson)
+        }
+    }
+
+    suspend fun translateLessonToArabicInternal(
+        lesson: Lesson,
+        onProgress: suspend (Float, String) -> Unit = { _, _ -> }
+    ) = withContext(Dispatchers.IO) {
+        val profile = providerProfiles.active() ?: error("قم بإعداد مزوّد الذكاء الاصطناعي أولاً")
+        val apiKey = providerProfiles.key(profile) ?: error("أدخل مفتاح API للمزوّد المفعل في الإعدادات")
+
+        val coursesRoot = YouTubeOfflineDownloader.coursesRootDir(context)
+        val existingEnFile = lesson.subEnPath?.let(::File)?.takeIf { it.isFile && it.length() > 0L }
+        val localVideoFile = lesson.videoPath.takeIf { it.isNotBlank() && !it.startsWith("http", true) }?.let(::File)?.takeIf { it.isFile }
+
+        val courseDir = existingEnFile?.parentFile?.parentFile
+            ?: localVideoFile?.parentFile?.parentFile
+            ?: YouTubeOfflineDownloader.courseDirFor(coursesRoot, lesson.courseId)
+        val stem = existingEnFile?.nameWithoutExtension
+            ?: localVideoFile?.nameWithoutExtension
+            ?: YouTubeOfflineDownloader.lessonFileStem(lesson.orderIndex, lesson.id)
+
+        val sourceStore = LessonSourceStore(context)
+        var enFileToSave: File? = existingEnFile
+        var sourceExt: String? = existingEnFile?.extension?.ifBlank { "vtt" }
+        var sourceText: String? = existingEnFile?.takeIf { it.length() <= 1_000_000 }?.readText(Charsets.UTF_8)
+
+        if (sourceText.isNullOrBlank()) {
+            val cached = sourceStore.exportSource(lesson)
+            if (cached != null) {
+                sourceExt = cached.first
+                sourceText = cached.second
+                val dir = File(courseDir, "subtitles_en").apply { mkdirs() }
+                enFileToSave = File(dir, "$stem.${cached.first}").apply { writeText(cached.second, Charsets.UTF_8) }
+            }
+        }
+
+        if (sourceText.isNullOrBlank() && lesson.sourceType == SourceType.YOUTUBE && !lesson.remoteId.isNullOrBlank()) {
+            onProgress(0.05f, "جاري جلب الترجمة الإنجليزية من يوتيوب…")
+            val (arFromYt, enFromYt) = transcriptClient.downloadPreferredTracksAsVtt(lesson.remoteId)
+            val enSaved = enFromYt?.let { vtt ->
+                File(courseDir, "subtitles_en").apply { mkdirs() }
+                    .let { dir -> File(dir, "$stem.vtt").apply { writeText(vtt, Charsets.UTF_8) } }
+            }
+            if (!arFromYt.isNullOrBlank()) {
+                val arSaved = File(courseDir, "subtitles_ar").apply { mkdirs() }
+                    .let { dir -> File(dir, "$stem.vtt").apply { writeText(arFromYt, Charsets.UTF_8) } }
+                dbHelper.setLessonSubtitles(lesson.id, arSaved.absolutePath, enSaved?.absolutePath ?: lesson.subEnPath)
+                sourceStore.removeSource(lesson)
+                onProgress(1f, "تم حفظ الترجمة العربية")
+                return@withContext
+            }
+            if (enFromYt != null) {
+                enFileToSave = enSaved
+                sourceExt = "vtt"
+                sourceText = enFromYt
+            }
+        }
+
+        require(!sourceText.isNullOrBlank() && !sourceExt.isNullOrBlank()) {
+            "لا توجد ترجمة إنجليزية متاحة لهذا الدرس للترجمة منها"
+        }
+
+        val (translatedText, outExt) = ArabicSubtitleTranslator.translateTranscript(
+            sourceText = sourceText,
+            sourceExtension = sourceExt,
+            profile = profile,
+            apiKey = apiKey,
+            onProgress = onProgress
+        )
+
+        val arDir = File(courseDir, "subtitles_ar").apply { mkdirs() }
+        val arFile = File(arDir, "$stem.$outExt")
+        val tmp = File(arDir, ".tmp_$stem.$outExt")
+        tmp.writeText(translatedText, Charsets.UTF_8)
+        if (arFile.exists()) arFile.delete()
+        if (!tmp.renameTo(arFile)) {
+            tmp.copyTo(arFile, overwrite = true)
+            tmp.delete()
+        }
+
+        dbHelper.setLessonSubtitles(
+            lessonId = lesson.id,
+            subArPath = arFile.absolutePath,
+            subEnPath = enFileToSave?.absolutePath ?: lesson.subEnPath
+        )
+        sourceStore.removeSource(lesson)
     }
 
     suspend fun deleteCourse(course: Course) = withContext(Dispatchers.IO) {

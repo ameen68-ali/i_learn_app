@@ -343,6 +343,20 @@ class CourseDatabaseHelper(context: Context, databaseName: String = DATABASE_NAM
         notifyChanged()
     }
 
+    suspend fun setLessonSubtitles(
+        lessonId: String,
+        subArPath: String?,
+        subEnPath: String?
+    ) = withContext(Dispatchers.IO) {
+        val db = writableDatabase
+        val values = ContentValues().apply {
+            put(COL_SUB_AR_PATH, subArPath)
+            put(COL_SUB_EN_PATH, subEnPath)
+        }
+        db.update(TABLE_LESSONS, values, "$COL_ID = ?", arrayOf(lessonId))
+        notifyChanged()
+    }
+
     suspend fun setLessonOfflineMedia(
         lessonId: String,
         videoPath: String,

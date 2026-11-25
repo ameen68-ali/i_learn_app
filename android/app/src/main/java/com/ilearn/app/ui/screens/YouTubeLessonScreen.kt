@@ -62,7 +62,13 @@ fun YouTubeLessonScreen(
     downloadError: String? = null,
     onDownloadOffline: () -> Unit = {},
     onCancelDownload: () -> Unit = {},
-    onDismissDownloadError: () -> Unit = {}
+    onDismissDownloadError: () -> Unit = {},
+    hasConfiguredAi: Boolean = false,
+    translationState: LessonDownloadState? = null,
+    translationError: String? = null,
+    onTranslateToArabic: () -> Unit = {},
+    onCancelTranslation: () -> Unit = {},
+    onDismissTranslationError: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val activity = remember(context) { context.findActivity() }
@@ -357,6 +363,33 @@ fun YouTubeLessonScreen(
                                     Icon(Icons.Default.SmartToy, contentDescription = null, modifier = Modifier.size(20.dp))
                                 }
 
+                                val canTranslateAr = hasConfiguredAi && !lesson.hasArabicSubtitles &&
+                                    (lesson.hasEnglishSubtitles || (lesson.isAvailable && !lesson.remoteId.isNullOrBlank()))
+                                if (canTranslateAr) {
+                                    if (translationState != null) {
+                                        IconButton(
+                                            onClick = onCancelTranslation,
+                                            modifier = Modifier.size(44.dp).semantics { contentDescription = "إلغاء الترجمة" }
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                CircularProgressIndicator(
+                                                    progress = { translationState.progress.coerceIn(0f, 1f) },
+                                                    strokeWidth = 2.5.dp,
+                                                    modifier = Modifier.size(28.dp)
+                                                )
+                                                Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(14.dp))
+                                            }
+                                        }
+                                    } else {
+                                        IconButton(
+                                            onClick = onTranslateToArabic,
+                                            modifier = Modifier.size(44.dp).semantics { contentDescription = "ترجمة النص للعربية بالذكاء الاصطناعي" }
+                                        ) {
+                                            Icon(Icons.Default.Translate, contentDescription = null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(20.dp))
+                                        }
+                                    }
+                                }
+
                                 if (lesson.isAvailable && lesson.remoteId != null) {
                                     if (downloadState != null) {
                                         IconButton(
@@ -388,6 +421,64 @@ fun YouTubeLessonScreen(
                                     modifier = Modifier.size(44.dp).semantics { contentDescription = "فتح في YouTube" }
                                 ) {
                                     Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(20.dp))
+                                }
+                            }
+                        }
+                    }
+
+                    translationState?.let { tr ->
+                        Surface(
+                            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(tr.stage, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                                    Text("${(tr.progress * 100).toInt()}%", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                                }
+                                LinearProgressIndicator(
+                                    progress = { tr.progress.coerceIn(0f, 1f) },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        }
+                    }
+
+                    translationError?.let { err ->
+                        Surface(
+                            color = MaterialTheme.colorScheme.errorContainer,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = err,
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                IconButton(
+                                    onClick = { onDismissTranslationError(); onTranslateToArabic() },
+                                    modifier = Modifier.size(40.dp).semantics { contentDescription = "إعادة محاولة الترجمة" }
+                                ) {
+                                    Icon(Icons.Default.Refresh, contentDescription = null, tint = MaterialTheme.colorScheme.onErrorContainer)
+                                }
+                                IconButton(
+                                    onClick = onDismissTranslationError,
+                                    modifier = Modifier.size(40.dp).semantics { contentDescription = "إخفاء الخطأ" }
+                                ) {
+                                    Icon(Icons.Default.Close, contentDescription = null, tint = MaterialTheme.colorScheme.onErrorContainer)
                                 }
                             }
                         }
@@ -493,6 +584,11 @@ fun YouTubeLessonScreen(
             lesson = lesson,
             positionMs = state.positionMs,
             profiles = profiles,
+            translationState = translationState,
+            translationError = translationError,
+            onTranslateToArabic = if (hasConfiguredAi && !lesson.hasArabicSubtitles) onTranslateToArabic else null,
+            onCancelTranslation = onCancelTranslation,
+            onDismissTranslationError = onDismissTranslationError,
             onSeek = { session.seekAndPlay(it); tutor = false },
             onSettings = onSettings,
             onClose = { tutor = false }

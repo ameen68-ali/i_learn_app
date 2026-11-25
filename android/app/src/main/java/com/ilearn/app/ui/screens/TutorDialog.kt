@@ -43,6 +43,7 @@ import androidx.compose.ui.window.DialogProperties
 import com.ilearn.app.data.Lesson
 import com.ilearn.app.data.SourceType
 import com.ilearn.app.tutor.*
+import com.ilearn.app.youtube.LessonDownloadState
 import com.ilearn.app.youtube.YouTubeCaptionTrack
 import com.ilearn.app.youtube.YouTubeTranscriptClient
 import kotlinx.coroutines.CancellationException
@@ -61,7 +62,12 @@ fun TutorDialog(
     profiles: ProviderProfileStore,
     onSeek: (Long) -> Unit,
     onSettings: () -> Unit,
-    onClose: () -> Unit
+    onClose: () -> Unit,
+    translationState: LessonDownloadState? = null,
+    translationError: String? = null,
+    onTranslateToArabic: (() -> Unit)? = null,
+    onCancelTranslation: () -> Unit = {},
+    onDismissTranslationError: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val sourceStore = remember(context) { LessonSourceStore(context) }
@@ -121,7 +127,7 @@ fun TutorDialog(
         }
     }
 
-    LaunchedEffect(lesson.id) {
+    LaunchedEffect(lesson.id, lesson.subArPath, lesson.subEnPath) {
         loading = true
         try {
             val loaded = withContext(Dispatchers.IO) { sourceStore.sources(lesson) }
@@ -136,6 +142,13 @@ fun TutorDialog(
             status = "Unable to read lesson sources: ${e.message}"
         } finally {
             loading = false
+        }
+    }
+
+    LaunchedEffect(translationError) {
+        if (!translationError.isNullOrBlank()) {
+            status = translationError
+            onDismissTranslationError()
         }
     }
 
@@ -356,6 +369,7 @@ fun TutorDialog(
                                     .background(badgeColor)
                             )
                             val sourceText = when {
+                                translationState != null -> translationState.stage
                                 downloadingTranscript -> "جاري تحميل نص يوتيوب…"
                                 loading -> "جاري تجهيز الدرس…"
                                 general -> "مساعدة عامة (بدون نص)"
@@ -369,6 +383,26 @@ fun TutorDialog(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
+                        }
+
+                        if (onTranslateToArabic != null && profile != null && !lesson.hasArabicSubtitles &&
+                            (lesson.hasEnglishSubtitles || sources.isNotEmpty() || lesson.sourceType == SourceType.YOUTUBE)
+                        ) {
+                            if (translationState != null) {
+                                IconButton(
+                                    onClick = onCancelTranslation,
+                                    modifier = Modifier.size(36.dp).semantics { contentDescription = "إلغاء الترجمة العربية" }
+                                ) {
+                                    Icon(Icons.Default.Close, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
+                                }
+                            } else {
+                                IconButton(
+                                    onClick = onTranslateToArabic,
+                                    modifier = Modifier.size(40.dp).semantics { contentDescription = "ترجمة النص للعربية بالذكاء الاصطناعي" }
+                                ) {
+                                    Icon(Icons.Default.Translate, contentDescription = null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(18.dp))
+                                }
+                            }
                         }
 
                         TextButton(
@@ -395,8 +429,13 @@ fun TutorDialog(
                     }
                 }
 
-                if (loading || downloadingTranscript || busy) {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                if (loading || downloadingTranscript || busy || translationState != null) {
+                    val trProg = translationState?.progress
+                    if (trProg != null) {
+                        LinearProgressIndicator(progress = { trProg.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+                    } else {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
                 }
 
                 // Main Chat Area
@@ -739,6 +778,26 @@ fun TutorDialog(
                                     downloadingTranscript = false
                                 }
                             }
+                        }
+                    )
+                }
+
+                if (onTranslateToArabic != null && profile != null && !lesson.hasArabicSubtitles &&
+                    (lesson.hasEnglishSubtitles || sources.isNotEmpty() || lesson.sourceType == SourceType.YOUTUBE)
+                ) {
+                    ListItem(
+                        headlineContent = {
+                            Text(if (translationState != null) translationState.stage else "ترجمة النص الإنجليزي للعربية (AI)")
+                        },
+                        supportingContent = {
+                            Text("إنتاج وحفظ ملف ترجمة عربي متزامن (.vtt) عبر المزوّد المفعّل")
+                        },
+                        leadingContent = {
+                            Icon(Icons.Default.Translate, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
+                        },
+                        modifier = Modifier.clickable {
+                            showOptionsSheet = false
+                            if (translationState != null) onCancelTranslation() else onTranslateToArabic()
                         }
                     )
                 }
