@@ -117,8 +117,8 @@ class SourceDatabaseTest {
         val db = context.openOrCreateDatabase("ilearn-study-test.db", 0, null)
         db.execSQL("CREATE TABLE courses (id TEXT PRIMARY KEY, title TEXT NOT NULL, folder_path TEXT NOT NULL, date_added INTEGER NOT NULL, source_type TEXT NOT NULL DEFAULT 'LOCAL', remote_id TEXT, last_synced_at INTEGER NOT NULL DEFAULT 0)")
         db.execSQL("CREATE TABLE lessons (id TEXT PRIMARY KEY, course_id TEXT NOT NULL, order_index INTEGER NOT NULL, title TEXT NOT NULL, video_path TEXT NOT NULL, sub_ar_path TEXT, sub_en_path TEXT, audio_ar_path TEXT, duration_ms INTEGER NOT NULL DEFAULT 0, is_available INTEGER NOT NULL DEFAULT 1)")
-        db.execSQL("CREATE TABLE progress (lesson_id TEXT PRIMARY KEY, course_id TEXT NOT NULL, is_completed INTEGER NOT NULL DEFAULT 0, last_position_ms INTEGER NOT NULL DEFAULT 0, total_duration_ms INTEGER NOT NULL DEFAULT 0, is_bookmarked INTEGER NOT NULL DEFAULT 0, last_watched_timestamp INTEGER NOT NULL DEFAULT 0)")
-        db.execSQL("CREATE TABLE notes (id TEXT PRIMARY KEY, lesson_id TEXT NOT NULL, course_id TEXT NOT NULL, timestamp_ms INTEGER NOT NULL, note_text TEXT NOT NULL, created_at INTEGER NOT NULL)")
+        db.execSQL("CREATE TABLE student_progress (lesson_id TEXT PRIMARY KEY, course_id TEXT NOT NULL, is_completed INTEGER NOT NULL DEFAULT 0, last_position_ms INTEGER NOT NULL DEFAULT 0, total_duration_ms INTEGER NOT NULL DEFAULT 0, is_bookmarked INTEGER NOT NULL DEFAULT 0, last_watched_timestamp INTEGER NOT NULL DEFAULT 0)")
+        db.execSQL("CREATE TABLE lesson_notes (id TEXT PRIMARY KEY, lesson_id TEXT NOT NULL, course_id TEXT NOT NULL, timestamp_ms INTEGER NOT NULL, note_text TEXT NOT NULL, created_at INTEGER NOT NULL)")
         db.execSQL("INSERT INTO courses VALUES ('c-study','Math','/owned/math',100,'LOCAL',NULL,0)")
         db.execSQL("INSERT INTO lessons VALUES ('l-study','c-study',1,'Derivatives','/owned/math/01.mp4',NULL,NULL,NULL,10000,1)")
         db.version = 4
@@ -156,5 +156,6 @@ class SourceDatabaseTest {
         assertEquals(0, helper.getDueFlashcardsCount(null, now + 10_000_000_000L))
         helper.close()
         context.deleteDatabase("ilearn-study-test.db")
+        Unit
     }
 }
