@@ -244,8 +244,13 @@ fun ProviderSettingsScreen(store: ProviderProfileStore, onBack: () -> Unit) {
                             fontWeight = FontWeight.Bold
                         )
                         if (editing != null) {
-                            TextButton(onClick = { editing = null; name = ""; model = ""; key = ""; status = ""; isError = false }) {
-                                Text("ملف جديد")
+                            IconButton(
+                                onClick = { editing = null; name = ""; model = ""; key = ""; status = ""; isError = false },
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .semantics { contentDescription = "إلغاء التعديل وإنشاء ملف جديد" }
+                            ) {
+                                Icon(Icons.Default.AddCircleOutline, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                             }
                         }
                     }

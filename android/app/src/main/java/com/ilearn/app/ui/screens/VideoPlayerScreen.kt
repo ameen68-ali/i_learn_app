@@ -1632,13 +1632,13 @@ fun StudyNotesSection(
                 }
 
                 Surface(
-                    color = MaterialTheme.colorScheme.primaryContainer,
+                    color = Color(0xFF38BDF8).copy(alpha = 0.18f),
                     shape = RoundedCornerShape(6.dp)
                 ) {
                     Text(
                         text = formatTimeMs(currentPosition),
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = Color(0xFF38BDF8),
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                     )

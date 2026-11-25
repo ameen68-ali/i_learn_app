@@ -425,9 +425,9 @@ fun YouTubeLessonScreen(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(
-                                modifier = Modifier.padding(12.dp),
+                                modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 Text(
                                     text = err,
@@ -435,8 +435,17 @@ fun YouTubeLessonScreen(
                                     style = MaterialTheme.typography.bodySmall,
                                     modifier = Modifier.weight(1f)
                                 )
-                                IconButton(onClick = { onDismissDownloadError(); onDownloadOffline() }) {
-                                    Icon(Icons.Default.Refresh, contentDescription = "إعادة التحميل", tint = MaterialTheme.colorScheme.onErrorContainer)
+                                IconButton(
+                                    onClick = { onDismissDownloadError(); onDownloadOffline() },
+                                    modifier = Modifier.size(40.dp).semantics { contentDescription = "إعادة التحميل" }
+                                ) {
+                                    Icon(Icons.Default.Refresh, contentDescription = null, tint = MaterialTheme.colorScheme.onErrorContainer)
+                                }
+                                IconButton(
+                                    onClick = onDismissDownloadError,
+                                    modifier = Modifier.size(40.dp).semantics { contentDescription = "إخفاء الخطأ" }
+                                ) {
+                                    Icon(Icons.Default.Close, contentDescription = null, tint = MaterialTheme.colorScheme.onErrorContainer)
                                 }
                             }
                         }

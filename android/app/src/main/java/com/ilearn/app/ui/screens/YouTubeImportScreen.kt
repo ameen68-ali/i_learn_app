@@ -136,6 +136,35 @@ fun YouTubeImportScreen(
                 }
             }
 
+            fun startPreview() {
+                if (busy || apiKey.isBlank() || parsedPlaylistId == null) return
+                showUrlError = true
+                job = scope.launch {
+                    busy = true
+                    errorMessage = null
+                    statusMessage = "جاري جلب بيانات قائمة التشغيل…"
+                    preview = null
+                    try {
+                        preview = YouTubeMetadataClient(context).preview(url, apiKey)
+                        statusMessage = if (preview?.lessons.isNullOrEmpty()) {
+                            "قائمة التشغيل لا تحتوي على دروس"
+                        } else {
+                            "راجِع الدروس قبل إضافتها للمكتبة"
+                        }
+                    } catch (e: CancellationException) {
+                        statusMessage = "تم إلغاء المعاينة"
+                        throw e
+                    } catch (e: Exception) {
+                        statusMessage = null
+                        errorMessage = e.message ?: "تعذّر تحميل قائمة التشغيل"
+                    } finally {
+                        busy = false
+                    }
+                }
+            }
+
+            val isUrlInvalid = url.isNotBlank() && parsedPlaylistId == null && (showUrlError || url.length > 35)
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.Top,
@@ -149,45 +178,34 @@ fun YouTubeImportScreen(
                     leadingIcon = { Icon(Icons.Default.Link, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
                     trailingIcon = {
                         if (url.isNotEmpty() && !busy) {
-                            IconButton(onClick = { url = ""; preview = null; errorMessage = null; statusMessage = null }) {
+                            IconButton(onClick = { url = ""; showUrlError = false; preview = null; errorMessage = null; statusMessage = null }) {
                                 Icon(Icons.Default.Close, contentDescription = "مسح الرابط")
                             }
                         }
                     },
                     supportingText = {
-                        if (url.isNotBlank() && parsedPlaylistId == null) {
+                        if (isUrlInvalid) {
                             Text("أدخل رابط قائمة تشغيل YouTube صحيح بصيغة HTTPS يحتوي على list=", color = MaterialTheme.colorScheme.error)
                         }
                     },
-                    isError = url.isNotBlank() && parsedPlaylistId == null,
+                    isError = isUrlInvalid,
                     singleLine = true,
                     enabled = !busy,
                     shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier
+                        .weight(1f)
+                        .onFocusChanged { focusState ->
+                            if (focusState.isFocused) {
+                                hadUrlFocus = true
+                            } else if (hadUrlFocus && url.isNotBlank()) {
+                                showUrlError = true
+                            }
+                        }
                 )
 
                 FilledIconButton(
                     enabled = !busy && apiKey.isNotBlank() && parsedPlaylistId != null,
-                    onClick = {
-                        job = scope.launch {
-                            busy = true
-                            errorMessage = null
-                            statusMessage = "جاري جلب بيانات قائمة التشغيل…"
-                            preview = null
-                            try {
-                                preview = YouTubeMetadataClient(context).preview(url, apiKey)
-                                statusMessage = "راجِع الدروس قبل إضافتها للمكتبة"
-                            } catch (e: CancellationException) {
-                                statusMessage = "تم إلغاء المعاينة"
-                                throw e
-                            } catch (e: Exception) {
-                                statusMessage = null
-                                errorMessage = e.message ?: "تعذّر تحميل قائمة التشغيل"
-                            } finally {
-                                busy = false
-                            }
-                        }
-                    },
+                    onClick = { startPreview() },
                     modifier = Modifier
                         .padding(top = 6.dp)
                         .size(52.dp)
@@ -232,7 +250,7 @@ fun YouTubeImportScreen(
                         IconButton(
                             onClick = { job?.cancel() },
                             modifier = Modifier
-                                .size(40.dp)
+                                .size(44.dp)
                                 .semantics { contentDescription = "إلغاء المعاينة" }
                         ) {
                             Icon(Icons.Default.Close, contentDescription = null, tint = MaterialTheme.colorScheme.error)
@@ -253,10 +271,32 @@ fun YouTubeImportScreen(
                     shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        modifier = Modifier.padding(start = 14.dp, end = 6.dp, top = 10.dp, bottom = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
                         Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = MaterialTheme.colorScheme.onErrorContainer)
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text(err, color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            text = err,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (parsedPlaylistId != null && apiKey.isNotBlank()) {
+                            IconButton(
+                                onClick = { startPreview() },
+                                modifier = Modifier.size(44.dp).semantics { contentDescription = "إعادة المحاولة" }
+                            ) {
+                                Icon(Icons.Default.Refresh, contentDescription = null, tint = MaterialTheme.colorScheme.onErrorContainer)
+                            }
+                        }
+                        IconButton(
+                            onClick = { errorMessage = null },
+                            modifier = Modifier.size(44.dp).semantics { contentDescription = "إخفاء الخطأ" }
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = null, tint = MaterialTheme.colorScheme.onErrorContainer)
+                        }
                     }
                 }
             }

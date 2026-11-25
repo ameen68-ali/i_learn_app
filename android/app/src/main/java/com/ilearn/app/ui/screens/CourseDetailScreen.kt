@@ -733,7 +733,7 @@ fun LessonItemCard(
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         // Bookmark Star IconButton
                         IconButton(
@@ -742,7 +742,7 @@ fun LessonItemCard(
                                 onToggleBookmark(!lesson.isBookmarked)
                             },
                             modifier = Modifier
-                                .size(40.dp)
+                                .size(44.dp)
                                 .semantics {
                                     contentDescription = if (lesson.isBookmarked) "إزالة من المفضلة" else "إضافة إلى المفضلة"
                                 }
@@ -750,7 +750,7 @@ fun LessonItemCard(
                             Icon(
                                 imageVector = if (lesson.isBookmarked) Icons.Default.Star else Icons.Default.StarBorder,
                                 contentDescription = null,
-                                tint = if (lesson.isBookmarked) Color(0xFFF59E0B) else MaterialTheme.colorScheme.outline,
+                                tint = if (lesson.isBookmarked) Color(0xFFF59E0B) else MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(21.dp)
                             )
                         }
@@ -759,16 +759,16 @@ fun LessonItemCard(
                         if (lesson.sourceType == SourceType.YOUTUBE && lesson.isAvailable && lesson.remoteId != null) {
                             when {
                                 downloadState != null -> {
-                                    Box(modifier = Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+                                    Box(modifier = Modifier.size(44.dp), contentAlignment = Alignment.Center) {
                                         CircularProgressIndicator(
                                             progress = { downloadState.progress.coerceIn(0f, 1f) },
-                                            modifier = Modifier.size(28.dp),
+                                            modifier = Modifier.size(30.dp),
                                             strokeWidth = 2.5.dp
                                         )
                                         IconButton(
                                             onClick = onCancelDownload,
                                             modifier = Modifier
-                                                .size(40.dp)
+                                                .size(44.dp)
                                                 .semantics { contentDescription = "إلغاء التحميل" }
                                         ) {
                                             Icon(
@@ -784,13 +784,13 @@ fun LessonItemCard(
                                     IconButton(
                                         onClick = onRequestRemoveOffline,
                                         modifier = Modifier
-                                            .size(40.dp)
+                                            .size(44.dp)
                                             .semantics { contentDescription = "محمّل أوفلاين 360p - انقر لحذف التحميل" }
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.OfflinePin,
                                             contentDescription = null,
-                                            tint = Color(0xFF10B981),
+                                            tint = MaterialTheme.colorScheme.secondary,
                                             modifier = Modifier.size(22.dp)
                                         )
                                     }
@@ -799,7 +799,7 @@ fun LessonItemCard(
                                     IconButton(
                                         onClick = onDownloadClick,
                                         modifier = Modifier
-                                            .size(40.dp)
+                                            .size(44.dp)
                                             .semantics { contentDescription = "تحميل أوفلاين (360p) مع الترجمة" }
                                     ) {
                                         Icon(
@@ -816,11 +816,11 @@ fun LessonItemCard(
 
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         // Completion Checkbox
                         Box(
-                            modifier = Modifier.size(40.dp),
+                            modifier = Modifier.size(44.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Checkbox(
@@ -830,7 +830,7 @@ fun LessonItemCard(
                                     onToggleComplete(checked)
                                 },
                                 colors = CheckboxDefaults.colors(
-                                    checkedColor = Color(0xFF10B981)
+                                    checkedColor = MaterialTheme.colorScheme.secondary
                                 ),
                                 modifier = Modifier.semantics {
                                     contentDescription = if (lesson.isCompleted) "تم إكمال الدرس" else "تعليم الدرس كمكتمل"
@@ -842,7 +842,7 @@ fun LessonItemCard(
                         IconButton(
                             onClick = onClick,
                             modifier = Modifier
-                                .size(40.dp)
+                                .size(44.dp)
                                 .semantics {
                                     contentDescription = "تشغيل الدرس"
                                 }

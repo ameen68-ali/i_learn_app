@@ -143,11 +143,24 @@ class ILearnPlayerController(private val context: Context) {
         return null
     }
 
+    fun retry() {
+        activeLesson?.let { loadLesson(it) }
+    }
+
     fun loadLesson(lesson: Lesson) {
         activeLesson = lesson
         _currentSubtitles.value = null
+        _playerError.value = null
+        _isBuffering.value = true
 
         val videoFile = File(lesson.videoPath)
+        val isLocalPath = !lesson.videoPath.startsWith("http", ignoreCase = true) &&
+            !lesson.videoPath.startsWith("content://", ignoreCase = true)
+        if (isLocalPath && !videoFile.isFile) {
+            _isBuffering.value = false
+            _playerError.value = "ملف الفيديو غير موجود على الجهاز. قد يكون تم حذفه أو نقله."
+            return
+        }
         val videoUri = if (videoFile.exists()) Uri.fromFile(videoFile) else Uri.parse(lesson.videoPath)
 
         val mediaItemBuilder = MediaItem.Builder().setUri(videoUri)

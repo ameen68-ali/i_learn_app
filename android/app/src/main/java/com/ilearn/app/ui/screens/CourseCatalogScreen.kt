@@ -867,14 +867,17 @@ fun MetricTile(
             Text(
                 text = title,
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.outline
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
 }
 
 @Composable
-fun EmptyCoursesView(onImportClick: () -> Unit) {
+fun EmptyCoursesView(
+    onImportClick: () -> Unit,
+    onAddYouTube: () -> Unit = {}
+) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -909,23 +912,35 @@ fun EmptyCoursesView(onImportClick: () -> Unit) {
         Spacer(modifier = Modifier.height(10.dp))
 
         Text(
-            text = "تطبيقك الخفيف والسريع للتعلم دون إنترنت.\nلم تقم باستيراد أي كورسات بعد. اضغط على الزر لاختيار ملف الكورس المضغوط (.zip أو .rar) وسيتم فهرسته فوراً.",
+            text = "تطبيقك السريع للتعلّم دون إنترنت وعبر قوائم يوتيوب.\nاستورد ملف كورس (.zip أو .rar) أو أضف قائمة تشغيل من YouTube.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
             lineHeight = 22.sp
         )
 
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(28.dp))
 
-        Button(
-            onClick = onImportClick,
-            shape = RoundedCornerShape(16.dp),
-            contentPadding = PaddingValues(horizontal = 24.dp, vertical = 14.dp)
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(Icons.Default.Add, contentDescription = null)
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("استيراد كورس الآن (.zip / .rar)", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            FilledIconButton(
+                onClick = onImportClick,
+                modifier = Modifier
+                    .size(56.dp)
+                    .semantics { contentDescription = "استيراد ملف كورس ZIP أو RAR" }
+            ) {
+                Icon(Icons.Default.UploadFile, contentDescription = null, modifier = Modifier.size(26.dp))
+            }
+            FilledTonalIconButton(
+                onClick = onAddYouTube,
+                modifier = Modifier
+                    .size(56.dp)
+                    .semantics { contentDescription = "إضافة كورس من YouTube" }
+            ) {
+                Icon(Icons.Default.OndemandVideo, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(26.dp))
+            }
         }
     }
 }
