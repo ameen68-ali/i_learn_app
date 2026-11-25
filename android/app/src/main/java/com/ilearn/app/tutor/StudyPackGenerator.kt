@@ -114,7 +114,9 @@ object StudyPackGenerator {
 
     fun samplePassagesEvenly(passages: List<SourcePassage>, maxChars: Int): List<SourcePassage> {
         if (passages.isEmpty()) return emptyList()
-        val maxItems = minOf(passages.size, 42)
+        val avgCost = (passages.sumOf { it.text.length + 24 } / passages.size).coerceAtLeast(32)
+        val budgetSlots = ((maxChars * 9L / 10L) / avgCost).toInt().coerceIn(1, passages.size)
+        val maxItems = minOf(passages.size, 42, budgetSlots)
         val result = mutableListOf<SourcePassage>()
         var remaining = maxChars
         val pickedIndices = (0 until maxItems).map { slot ->
@@ -123,9 +125,10 @@ object StudyPackGenerator {
 
         for (idx in pickedIndices) {
             val item = passages[idx]
-            if (item.text.length + 24 <= remaining) {
+            val cost = item.text.length + 24
+            if (cost <= remaining) {
                 result.add(item)
-                remaining -= (item.text.length + 24)
+                remaining -= cost
             }
         }
         if (result.isEmpty() && passages.first().text.isNotEmpty()) {

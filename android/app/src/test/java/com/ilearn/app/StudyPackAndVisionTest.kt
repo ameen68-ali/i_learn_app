@@ -84,10 +84,9 @@ class StudyPackAndVisionTest {
         val passages = (0 until 100).map { i ->
             SourcePassage(
                 id = "p-$i",
-                startMs = i * 10_000L,
-                endMs = (i + 1) * 10_000L,
                 text = "Lecture excerpt number $i covering linear transformations.",
-                label = "transcript"
+                startMs = i * 10_000L,
+                endMs = (i + 1) * 10_000L
             )
         }
         val sampled = StudyPackGenerator.samplePassagesEvenly(passages, maxChars = 900)
