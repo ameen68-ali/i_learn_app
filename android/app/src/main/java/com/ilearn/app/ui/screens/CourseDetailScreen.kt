@@ -631,7 +631,7 @@ fun LessonItemCard(
                         text = displayTitle,
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = if (lesson.isCompleted) FontWeight.Normal else FontWeight.SemiBold,
-                        color = if (lesson.isCompleted) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onSurface,
+                        color = if (lesson.isCompleted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -650,7 +650,7 @@ fun LessonItemCard(
                             Text(
                                 text = String.format("%02d:%02d", m, s),
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.outline
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
 

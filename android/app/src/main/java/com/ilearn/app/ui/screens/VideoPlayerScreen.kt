@@ -935,6 +935,51 @@ fun VideoPlayerScreen(
                             modifier = Modifier.fillMaxSize()
                         )
 
+                        if (playerError != null) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Color.Black.copy(alpha = 0.85f))
+                                    .padding(16.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.ErrorOutline,
+                                        contentDescription = null,
+                                        tint = Color(0xFFFCA5A5),
+                                        modifier = Modifier.size(34.dp)
+                                    )
+                                    Text(
+                                        text = playerError ?: "",
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        textAlign = TextAlign.Center
+                                    )
+                                    FilledTonalIconButton(
+                                        onClick = { playerController.retry() },
+                                        modifier = Modifier.size(48.dp).semantics { contentDescription = "إعادة محاولة التشغيل" }
+                                    ) {
+                                        Icon(Icons.Default.Refresh, contentDescription = null)
+                                    }
+                                }
+                            }
+                        } else if (isBuffering) {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(
+                                    color = Color(0xFF38BDF8),
+                                    strokeWidth = 3.dp,
+                                    modifier = Modifier.size(36.dp)
+                                )
+                            }
+                        }
+
                         // Seek Ripple in Portrait
                         seekRippleSide?.let { side ->
                             Box(

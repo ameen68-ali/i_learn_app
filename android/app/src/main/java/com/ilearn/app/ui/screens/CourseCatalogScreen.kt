@@ -138,6 +138,7 @@ fun CourseCatalogScreen(
     LaunchedEffect(importState) {
         when (importState) {
             is ImportState.Success -> {
+                persistentImportError = null
                 snackbarHostState.showSnackbar(
                     message = "تم استيراد كورس \"${importState.courseTitle}\" بنجاح (${importState.lessonCount} درساً)!",
                     duration = SnackbarDuration.Short
@@ -145,10 +146,7 @@ fun CourseCatalogScreen(
                 onDismissImportState()
             }
             is ImportState.Error -> {
-                snackbarHostState.showSnackbar(
-                    message = importState.message,
-                    duration = SnackbarDuration.Long
-                )
+                persistentImportError = importState.message
                 onDismissImportState()
             }
             else -> {}
@@ -190,15 +188,15 @@ fun CourseCatalogScreen(
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Surface(
-                                    color = Color(0xFF10B981).copy(alpha = 0.15f),
+                                    color = MaterialTheme.colorScheme.secondaryContainer,
                                     shape = RoundedCornerShape(4.dp)
                                 ) {
                                     Text(
-                                        text = "100% Offline",
-                                        color = Color(0xFF10B981),
+                                        text = "Offline + YT",
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer,
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
                                     )
                                 }
                             }

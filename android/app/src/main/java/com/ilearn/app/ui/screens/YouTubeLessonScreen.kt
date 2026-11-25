@@ -220,25 +220,52 @@ fun YouTubeLessonScreen(
                                     }
                             )
                         }
+                        if (!state.ready && state.error == null) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Color.Black.copy(alpha = 0.55f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    CircularProgressIndicator(
+                                        color = Color(0xFF38BDF8),
+                                        strokeWidth = 3.dp,
+                                        modifier = Modifier.size(34.dp)
+                                    )
+                                    Text(
+                                        text = "جاري تحميل الفيديو من يوتيوب…",
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.labelMedium
+                                    )
+                                }
+                            }
+                        }
                     }
                 } else {
                     Surface(
                         color = MaterialTheme.colorScheme.surfaceVariant,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Column(
-                            modifier = Modifier.padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             Text(
                                 text = "هذا الفيديو غير متاح للتشغيل المدمج داخل التطبيق. ملاحظاتك وتقدّمك محفوظان.",
-                                style = MaterialTheme.typography.bodyMedium
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.weight(1f)
                             )
                             if (lesson.remoteId != null) {
-                                OutlinedButton(onClick = ::openExternalYouTube) {
-                                    Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("فتح في YouTube")
+                                OutlinedIconButton(
+                                    onClick = ::openExternalYouTube,
+                                    modifier = Modifier.size(48.dp).semantics { contentDescription = "فتح في YouTube" }
+                                ) {
+                                    Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null)
                                 }
                             }
                         }
@@ -259,27 +286,29 @@ fun YouTubeLessonScreen(
                             shape = RoundedCornerShape(14.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Column(
-                                modifier = Modifier.padding(12.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Text(
                                     text = err,
                                     color = MaterialTheme.colorScheme.onErrorContainer,
-                                    style = MaterialTheme.typography.bodySmall
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.weight(1f)
                                 )
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    FilledTonalButton(onClick = { session.retry() }) {
-                                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text("إعادة المحاولة")
-                                    }
-                                    if (lesson.remoteId != null) {
-                                        OutlinedButton(onClick = ::openExternalYouTube) {
-                                            Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text("YouTube ↗")
-                                        }
+                                FilledTonalIconButton(
+                                    onClick = { session.retry() },
+                                    modifier = Modifier.size(44.dp).semantics { contentDescription = "إعادة المحاولة" }
+                                ) {
+                                    Icon(Icons.Default.Refresh, contentDescription = null)
+                                }
+                                if (lesson.remoteId != null) {
+                                    OutlinedIconButton(
+                                        onClick = ::openExternalYouTube,
+                                        modifier = Modifier.size(44.dp).semantics { contentDescription = "فتح في YouTube" }
+                                    ) {
+                                        Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null)
                                     }
                                 }
                             }

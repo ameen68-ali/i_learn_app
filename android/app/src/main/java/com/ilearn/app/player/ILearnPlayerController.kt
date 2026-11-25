@@ -70,6 +70,12 @@ class ILearnPlayerController(private val context: Context) {
     private val _currentSubtitles = MutableStateFlow<String?>(null)
     val currentSubtitles: StateFlow<String?> = _currentSubtitles.asStateFlow()
 
+    private val _isBuffering = MutableStateFlow(false)
+    val isBuffering: StateFlow<Boolean> = _isBuffering.asStateFlow()
+
+    private val _playerError = MutableStateFlow<String?>(null)
+    val playerError: StateFlow<String?> = _playerError.asStateFlow()
+
     private var activeLesson: Lesson? = null
     val activeLessonId: String? get() = activeLesson?.id
 
@@ -81,11 +87,18 @@ class ILearnPlayerController(private val context: Context) {
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
+                _isBuffering.value = playbackState == Player.STATE_BUFFERING
                 if (playbackState == Player.STATE_READY) {
+                    _playerError.value = null
                     _duration.value = exoPlayer.duration.coerceAtLeast(0L)
                     applyAudioTrackMode(_audioTrackMode.value)
                     applySubtitleMode(_subtitleMode.value)
                 }
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                _isBuffering.value = false
+                _playerError.value = "تعذّر تشغيل الفيديو (${error.errorCodeName}). تأكد من سلامة الملف أو أعد المحاولة."
             }
 
             override fun onTracksChanged(tracks: Tracks) {

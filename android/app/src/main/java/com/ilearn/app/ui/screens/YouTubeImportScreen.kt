@@ -58,6 +58,8 @@ fun YouTubeImportScreen(
     var statusMessage by remember { mutableStateOf<String?>(null) }
     var job by remember { mutableStateOf<Job?>(null) }
     var busy by remember { mutableStateOf(false) }
+    var showUrlError by remember { mutableStateOf(false) }
+    var hadUrlFocus by remember { mutableStateOf(false) }
 
     val parsedPlaylistId = remember(url) { PlaylistUrlParser.parse(url) }
 

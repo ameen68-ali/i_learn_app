@@ -154,10 +154,10 @@ fun ProviderSettingsScreen(store: ProviderProfileStore, onBack: () -> Unit) {
                             ) {
                                 Text(p.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                                 if (isActive) {
-                                    Surface(color = Color(0xFF10B981).copy(alpha = 0.16f), shape = RoundedCornerShape(8.dp)) {
+                                    Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(8.dp)) {
                                         Text(
                                             text = "✓ مفعّل",
-                                            color = Color(0xFF10B981),
+                                            color = MaterialTheme.colorScheme.onSecondaryContainer,
                                             style = MaterialTheme.typography.labelSmall,
                                             fontWeight = FontWeight.Bold,
                                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
