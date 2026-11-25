@@ -1,6 +1,8 @@
 package com.ilearn.app
 
 import com.ilearn.app.youtube.PlaylistUrlParser
+import com.ilearn.app.youtube.YouTubeCaptionTrack
+import com.ilearn.app.youtube.YouTubeOfflineDownloader
 import com.ilearn.app.youtube.YouTubeTranscriptClient
 import com.ilearn.app.tutor.TranscriptParser
 import org.junit.Assert.*
@@ -87,5 +89,21 @@ class LessonSourcesTest {
         val cleanedParsed = TranscriptParser.parse(cleaned, "vtt")
         assertEquals(1, cleanedParsed.size)
         assertEquals("Hello world\nNext sentence", cleanedParsed.single().text)
+    }
+
+    @Test fun offlineDownloadHelpersEnforce360pSafePathsAndTrackLanguageSelection() {
+        assertTrue(YouTubeOfflineDownloader.FORMAT_360P.contains("height<=360"))
+        assertFalse(YouTubeOfflineDownloader.safeSlug("youtube:PL/abc..def").contains("/"))
+        assertFalse(YouTubeOfflineDownloader.safeSlug("youtube:PL/abc..def").contains("."))
+        assertTrue(YouTubeOfflineDownloader.lessonFileStem(3, "youtube:PL1:item1").startsWith("003_"))
+
+        val tracks = listOf(
+            YouTubeCaptionTrack("en", "English (auto)", "https://www.youtube.com/api/timedtext?v=1", true),
+            YouTubeCaptionTrack("en-US", "English", "https://www.youtube.com/api/timedtext?v=2", false),
+            YouTubeCaptionTrack("ar", "العربية (تلقائي)", "https://www.youtube.com/api/timedtext?v=3", true)
+        )
+        assertEquals("en-US", YouTubeTranscriptClient.chooseTrackForLanguage(tracks, "en")?.languageCode)
+        assertEquals("ar", YouTubeTranscriptClient.chooseTrackForLanguage(tracks, "ar")?.languageCode)
+        assertNull(YouTubeTranscriptClient.chooseTrackForLanguage(tracks, "fr"))
     }
 }

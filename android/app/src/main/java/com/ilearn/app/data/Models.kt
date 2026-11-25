@@ -59,6 +59,9 @@ data class Lesson(
 
     val hasArabicAudio: Boolean
         get() = !audioArPath.isNullOrBlank()
+
+    val hasOfflineVideo: Boolean
+        get() = videoPath.isNotBlank() && java.io.File(videoPath).isFile
 }
 
 /**

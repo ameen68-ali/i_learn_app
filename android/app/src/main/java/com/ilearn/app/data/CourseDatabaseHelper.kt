@@ -162,6 +162,41 @@ class CourseDatabaseHelper(context: Context, databaseName: String = DATABASE_NAM
         }
     }
 
+    private fun upsertRemoteLessonPreservingOfflineMedia(db: SQLiteDatabase, values: ContentValues) {
+        if (db.insertWithOnConflict(TABLE_LESSONS, null, values, SQLiteDatabase.CONFLICT_IGNORE) == -1L) {
+            val id = values.getAsString(COL_ID)
+            val updateValues = ContentValues(values)
+            db.rawQuery(
+                "SELECT $COL_VIDEO_PATH, $COL_SUB_AR_PATH, $COL_SUB_EN_PATH, $COL_AUDIO_AR_PATH, $COL_DURATION_MS FROM $TABLE_LESSONS WHERE $COL_ID = ?",
+                arrayOf(id)
+            ).use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val existingVideo = cursor.getString(0).orEmpty()
+                    val existingSubAr = cursor.getString(1)
+                    val existingSubEn = cursor.getString(2)
+                    val existingAudioAr = cursor.getString(3)
+                    val existingDuration = cursor.getLong(4)
+                    if (existingVideo.isNotBlank() && updateValues.getAsString(COL_VIDEO_PATH).isNullOrBlank()) {
+                        updateValues.put(COL_VIDEO_PATH, existingVideo)
+                    }
+                    if (!existingSubAr.isNullOrBlank() && updateValues.getAsString(COL_SUB_AR_PATH).isNullOrBlank()) {
+                        updateValues.put(COL_SUB_AR_PATH, existingSubAr)
+                    }
+                    if (!existingSubEn.isNullOrBlank() && updateValues.getAsString(COL_SUB_EN_PATH).isNullOrBlank()) {
+                        updateValues.put(COL_SUB_EN_PATH, existingSubEn)
+                    }
+                    if (!existingAudioAr.isNullOrBlank() && updateValues.getAsString(COL_AUDIO_AR_PATH).isNullOrBlank()) {
+                        updateValues.put(COL_AUDIO_AR_PATH, existingAudioAr)
+                    }
+                    if (existingDuration > 0L && (updateValues.getAsLong(COL_DURATION_MS) ?: 0L) <= 0L) {
+                        updateValues.put(COL_DURATION_MS, existingDuration)
+                    }
+                }
+            }
+            check(db.update(TABLE_LESSONS, updateValues, "$COL_ID = ?", arrayOf(id)) == 1)
+        }
+    }
+
     override fun onConfigure(db: SQLiteDatabase) {
         super.onConfigure(db)
         db.setForeignKeyConstraintsEnabled(true)
@@ -200,7 +235,11 @@ class CourseDatabaseHelper(context: Context, databaseName: String = DATABASE_NAM
                     put("remote_id", lesson.remoteId)
                     put("available", if (lesson.isAvailable) 1 else 0)
                 }
-                upsert(db, TABLE_LESSONS, lessonValues)
+                if (course.sourceType == SourceType.YOUTUBE) {
+                    upsertRemoteLessonPreservingOfflineMedia(db, lessonValues)
+                } else {
+                    upsert(db, TABLE_LESSONS, lessonValues)
+                }
             }
             db.setTransactionSuccessful()
         } finally {
@@ -299,6 +338,26 @@ class CourseDatabaseHelper(context: Context, databaseName: String = DATABASE_NAM
         val db = writableDatabase
         val values = ContentValues().apply {
             put(COL_AUDIO_AR_PATH, audioPath)
+        }
+        db.update(TABLE_LESSONS, values, "$COL_ID = ?", arrayOf(lessonId))
+        notifyChanged()
+    }
+
+    suspend fun setLessonOfflineMedia(
+        lessonId: String,
+        videoPath: String,
+        subArPath: String?,
+        subEnPath: String?,
+        durationMs: Long? = null
+    ) = withContext(Dispatchers.IO) {
+        val db = writableDatabase
+        val values = ContentValues().apply {
+            put(COL_VIDEO_PATH, videoPath)
+            put(COL_SUB_AR_PATH, subArPath)
+            put(COL_SUB_EN_PATH, subEnPath)
+            if (durationMs != null && durationMs > 0L) {
+                put(COL_DURATION_MS, durationMs)
+            }
         }
         db.update(TABLE_LESSONS, values, "$COL_ID = ?", arrayOf(lessonId))
         notifyChanged()
@@ -756,7 +815,7 @@ class CourseDatabaseHelper(context: Context, databaseName: String = DATABASE_NAM
                     put("video_path", ""); put("duration_ms", l.optLong("durationMs", 0L)); put("source_type", "YOUTUBE")
                     put("remote_id", video); put("available", if (video != null && l.optBoolean("available", true)) 1 else 0)
                 }
-                if (existingSync <= incomingSync) upsert(db, TABLE_LESSONS, values)
+                if (existingSync <= incomingSync) upsertRemoteLessonPreservingOfflineMedia(db, values)
                 else db.insertWithOnConflict(TABLE_LESSONS, null, values, SQLiteDatabase.CONFLICT_IGNORE)
             }
         }

@@ -529,7 +529,7 @@ fun VideoPlayerScreen(
                                             overflow = TextOverflow.Ellipsis
                                         )
                                         Text(
-                                            text = courseTitle,
+                                            text = if (lesson.sourceType == com.ilearn.app.data.SourceType.YOUTUBE) "$courseTitle • أوفلاين 360p" else courseTitle,
                                             style = MaterialTheme.typography.labelSmall,
                                             color = Color(0xFF94A3B8)
                                         )

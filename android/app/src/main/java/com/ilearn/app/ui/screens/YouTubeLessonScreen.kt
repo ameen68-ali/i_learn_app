@@ -40,6 +40,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import com.ilearn.app.data.Lesson
 import com.ilearn.app.data.LessonNote
 import com.ilearn.app.tutor.ProviderProfileStore
+import com.ilearn.app.youtube.LessonDownloadState
 import com.ilearn.app.youtube.YouTubePlaybackSession
 import kotlinx.coroutines.delay
 
@@ -56,7 +57,12 @@ fun YouTubeLessonScreen(
     onBookmark: (Boolean) -> Unit,
     onAddNote: (Long, String) -> Unit,
     onDeleteNote: (String) -> Unit,
-    onSettings: () -> Unit
+    onSettings: () -> Unit,
+    downloadState: LessonDownloadState? = null,
+    downloadError: String? = null,
+    onDownloadOffline: () -> Unit = {},
+    onCancelDownload: () -> Unit = {},
+    onDismissDownloadError: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val activity = remember(context) { context.findActivity() }
@@ -291,7 +297,31 @@ fun YouTubeLessonScreen(
                         ) {
                             Icon(Icons.Default.SmartToy, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("المعلّم الذكي • AI Tutor", fontWeight = FontWeight.Bold, maxLines = 1)
+                            Text("المعلّم الذكي", fontWeight = FontWeight.Bold, maxLines = 1)
+                        }
+
+                        if (lesson.isAvailable && lesson.remoteId != null) {
+                            if (downloadState != null) {
+                                OutlinedButton(
+                                    onClick = onCancelDownload,
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.heightIn(min = 48.dp)
+                                ) {
+                                    Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("${(downloadState.progress * 100).toInt()}%")
+                                }
+                            } else {
+                                FilledTonalButton(
+                                    onClick = onDownloadOffline,
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.heightIn(min = 48.dp)
+                                ) {
+                                    Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("360p")
+                                }
+                            }
                         }
 
                         FilledTonalButton(
@@ -303,6 +333,55 @@ fun YouTubeLessonScreen(
                             Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(4.dp))
                             Text("YouTube")
+                        }
+                    }
+
+                    downloadState?.let { dl ->
+                        Surface(
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(dl.stage, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                                    Text("${(dl.progress * 100).toInt()}%", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                                }
+                                LinearProgressIndicator(
+                                    progress = { dl.progress.coerceIn(0f, 1f) },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        }
+                    }
+
+                    downloadError?.let { err ->
+                        Surface(
+                            color = MaterialTheme.colorScheme.errorContainer,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = err,
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                TextButton(onClick = { onDismissDownloadError(); onDownloadOffline() }) {
+                                    Text("إعادة")
+                                }
+                            }
                         }
                     }
 

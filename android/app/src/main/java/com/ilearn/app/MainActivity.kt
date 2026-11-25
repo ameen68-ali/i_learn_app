@@ -63,6 +63,9 @@ class MainActivity : ComponentActivity() {
                         val resumeLesson by repository.resumeLesson.collectAsState()
                         val stats by repository.stats.collectAsState()
                         val importState by repository.importState.collectAsState()
+                        val dbUpdates by repository.dbHelper.databaseUpdates.collectAsState()
+                        val lessonDownloads by repository.lessonDownloads.collectAsState()
+                        val lessonDownloadErrors by repository.lessonDownloadErrors.collectAsState()
 
                         NavHost(navController = navController, startDestination = "catalog") {
                             // 1. Home / Course Catalog Screen (Zero preloaded, direct view, stats & backup)
@@ -136,7 +139,7 @@ class MainActivity : ComponentActivity() {
 
                                 var lessons by remember { mutableStateOf<List<Lesson>>(emptyList()) }
 
-                                LaunchedEffect(courseId, courses) {
+                                LaunchedEffect(courseId, courses, dbUpdates) {
                                     lessons = repository.getLessonsForCourse(courseId)
                                 }
 
@@ -144,6 +147,8 @@ class MainActivity : ComponentActivity() {
                                     CourseDetailScreen(
                                         course = currentCourse,
                                         lessons = lessons,
+                                        lessonDownloads = lessonDownloads,
+                                        lessonDownloadErrors = lessonDownloadErrors,
                                         onRefresh = { currentCourse.remoteId?.let { navController.navigate("youtube_import?playlist=$it") } },
                                         onBack = {
                                             playerController.pause()
@@ -163,6 +168,21 @@ class MainActivity : ComponentActivity() {
                                                 repository.toggleBookmark(lesson.id, currentCourse.id, bookmarked)
                                                 lessons = repository.getLessonsForCourse(courseId)
                                             }
+                                        },
+                                        onDownloadLesson = { lesson ->
+                                            repository.startYouTubeLessonDownload(lesson)
+                                        },
+                                        onCancelDownload = { lessonId ->
+                                            repository.cancelYouTubeLessonDownload(lessonId)
+                                        },
+                                        onRemoveOfflineLesson = { lesson ->
+                                            lifecycleScope.launch {
+                                                repository.removeOfflineYouTubeVideo(lesson)
+                                                lessons = repository.getLessonsForCourse(courseId)
+                                            }
+                                        },
+                                        onDismissDownloadError = { lessonId ->
+                                            repository.dismissDownloadError(lessonId)
                                         }
                                     )
                                 }
@@ -184,7 +204,7 @@ class MainActivity : ComponentActivity() {
                                 var activeLesson by remember { mutableStateOf<Lesson?>(null) }
                                 var notes by remember { mutableStateOf<List<LessonNote>>(emptyList()) }
 
-                                LaunchedEffect(courseId, lessonId) {
+                                LaunchedEffect(courseId, lessonId, dbUpdates) {
                                     allLessons = repository.getLessonsForCourse(courseId)
                                     activeLesson = allLessons.firstOrNull { it.id == lessonId }
                                     notes = repository.getNotesForLesson(lessonId)
@@ -192,8 +212,17 @@ class MainActivity : ComponentActivity() {
 
                                 activeLesson?.let { lesson ->
                                     var tutorPosition by remember(lesson.id) { mutableStateOf<Long?>(null) }
-                                    if (lesson.sourceType == SourceType.YOUTUBE) {
+                                    val useOfflinePlayer = lesson.sourceType == SourceType.LOCAL || lesson.hasOfflineVideo
+                                    LaunchedEffect(lesson.id, useOfflinePlayer) {
+                                        if (!useOfflinePlayer) playerController.pause()
+                                    }
+                                    if (!useOfflinePlayer) {
                                         YouTubeLessonScreen(lesson, allLessons, notes, providerProfiles,
+                                            downloadState = lessonDownloads[lesson.id],
+                                            downloadError = lessonDownloadErrors[lesson.id],
+                                            onDownloadOffline = { repository.startYouTubeLessonDownload(lesson) },
+                                            onCancelDownload = { repository.cancelYouTubeLessonDownload(lesson.id) },
+                                            onDismissDownloadError = { repository.dismissDownloadError(lesson.id) },
                                             onBack = { navController.popBackStack() },
                                             onNavigate = { target -> navController.navigate("player/${target.courseId}/${target.id}") { popUpTo("player/{courseId}/{lessonId}") { inclusive = true } } },
                                             onProgress = { pos, dur -> lifecycleScope.launch { repository.updateLessonProgress(lesson.id, lesson.courseId, pos, dur) } },

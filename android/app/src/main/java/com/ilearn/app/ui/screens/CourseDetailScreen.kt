@@ -30,8 +30,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ilearn.app.data.Course
 import com.ilearn.app.data.Lesson
+import com.ilearn.app.data.SourceType
 import com.ilearn.app.ui.components.CompletionCelebrationDialog
 import com.ilearn.app.ui.components.ContextualEmptyState
+import com.ilearn.app.youtube.LessonDownloadState
 
 enum class LessonFilter(val label: String) {
     ALL("الكل"),
@@ -50,12 +52,28 @@ fun CourseDetailScreen(
     onRefresh: () -> Unit,
     onSelectLesson: (Lesson) -> Unit,
     onToggleLessonCompleted: (Lesson, Boolean) -> Unit,
-    onToggleLessonBookmarked: (Lesson, Boolean) -> Unit
+    onToggleLessonBookmarked: (Lesson, Boolean) -> Unit,
+    lessonDownloads: Map<String, LessonDownloadState> = emptyMap(),
+    lessonDownloadErrors: Map<String, String> = emptyMap(),
+    onDownloadLesson: (Lesson) -> Unit = {},
+    onCancelDownload: (String) -> Unit = {},
+    onRemoveOfflineLesson: (Lesson) -> Unit = {},
+    onDismissDownloadError: (String) -> Unit = {}
 ) {
     var selectedFilter by remember { mutableStateOf(LessonFilter.ALL) }
     var searchQuery by remember { mutableStateOf("") }
     var showCelebrationDialog by remember { mutableStateOf(false) }
     var hasAutoShownCelebration by remember { mutableStateOf(false) }
+    var lessonToDeleteOffline by remember { mutableStateOf<Lesson?>(null) }
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(lessonDownloadErrors) {
+        val firstEntry = lessonDownloadErrors.entries.firstOrNull()
+        if (firstEntry != null) {
+            snackbarHostState.showSnackbar(firstEntry.value, duration = SnackbarDuration.Long)
+            onDismissDownloadError(firstEntry.key)
+        }
+    }
 
     val completedCount = lessons.count { it.isCompleted }
     val bookmarkedCount = lessons.count { it.isBookmarked }
@@ -99,7 +117,29 @@ fun CourseDetailScreen(
         )
     }
 
+    lessonToDeleteOffline?.let { target ->
+        AlertDialog(
+            onDismissRequest = { lessonToDeleteOffline = null },
+            icon = { Icon(Icons.Default.DeleteOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+            title = { Text("حذف النسخة المحملة؟", fontWeight = FontWeight.Bold) },
+            text = { Text("سيتم حذف ملف الفيديو المحمل (360p) للدرس \"${target.title}\" لتوفير المساحة. يمكنك مشاهدته عبر الإنترنت أو إعادة تحميله لاحقاً.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onRemoveOfflineLesson(target)
+                        lessonToDeleteOffline = null
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) { Text("حذف الملف") }
+            },
+            dismissButton = {
+                TextButton(onClick = { lessonToDeleteOffline = null }) { Text("إلغاء") }
+            }
+        )
+    }
+
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
@@ -300,9 +340,13 @@ fun CourseDetailScreen(
             items(filteredLessons, key = { it.id }) { lesson ->
                 LessonItemCard(
                     lesson = lesson,
+                    downloadState = lessonDownloads[lesson.id],
                     onClick = { onSelectLesson(lesson) },
                     onToggleComplete = { completed -> onToggleLessonCompleted(lesson, completed) },
-                    onToggleBookmark = { bookmarked -> onToggleLessonBookmarked(lesson, bookmarked) }
+                    onToggleBookmark = { bookmarked -> onToggleLessonBookmarked(lesson, bookmarked) },
+                    onDownloadClick = { onDownloadLesson(lesson) },
+                    onCancelDownload = { onCancelDownload(lesson.id) },
+                    onRequestRemoveOffline = { lessonToDeleteOffline = lesson }
                 )
             }
 
@@ -383,7 +427,11 @@ fun LessonItemCard(
     lesson: Lesson,
     onClick: () -> Unit,
     onToggleComplete: (Boolean) -> Unit,
-    onToggleBookmark: (Boolean) -> Unit
+    onToggleBookmark: (Boolean) -> Unit,
+    downloadState: LessonDownloadState? = null,
+    onDownloadClick: () -> Unit = {},
+    onCancelDownload: () -> Unit = {},
+    onRequestRemoveOffline: () -> Unit = {}
 ) {
     val haptic = LocalHapticFeedback.current
 
@@ -404,162 +452,280 @@ fun LessonItemCard(
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
-        Row(
-            modifier = Modifier
-                .padding(14.dp)
-                .fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Lesson Index Badge
-            Box(
-                modifier = Modifier
-                    .size(44.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(
-                        if (lesson.isCompleted) Color(0xFF10B981).copy(alpha = 0.15f)
-                        else MaterialTheme.colorScheme.primaryContainer
-                    ),
-                contentAlignment = Alignment.Center
+        Column(modifier = Modifier.fillMaxWidth().padding(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = String.format("%02d", lesson.orderIndex),
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp,
-                    color = if (lesson.isCompleted) Color(0xFF047857) else MaterialTheme.colorScheme.primary
-                )
-            }
-
-            Spacer(modifier = Modifier.width(14.dp))
-
-            // Lesson Details
-            Column(modifier = Modifier.weight(1f)) {
-                val displayTitle = remember(lesson.title) {
-                    lesson.title.replace(Regex("^\\d+\\s*[-–.]\\s*"), "").trim().ifBlank { lesson.title }
-                }
-                Text(
-                    text = displayTitle,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = if (lesson.isCompleted) FontWeight.Normal else FontWeight.SemiBold,
-                    color = if (lesson.isCompleted) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onSurface,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                // Lesson Index Badge
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(
+                            if (lesson.isCompleted) Color(0xFF10B981).copy(alpha = 0.15f)
+                            else MaterialTheme.colorScheme.primaryContainer
+                        ),
+                    contentAlignment = Alignment.Center
                 ) {
-                    if (lesson.durationMs > 0) {
-                        val totalSecs = lesson.durationMs / 1000
-                        val m = totalSecs / 60
-                        val s = totalSecs % 60
-                        Text(
-                            text = String.format("%02d:%02d", m, s),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.outline
-                        )
-                    }
+                    Text(
+                        text = String.format("%02d", lesson.orderIndex),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
+                        color = if (lesson.isCompleted) Color(0xFF047857) else MaterialTheme.colorScheme.primary
+                    )
+                }
 
-                    if (lesson.hasArabicAudio) {
-                        Surface(
-                            color = Color(0xFF10B981).copy(alpha = 0.2f),
-                            shape = RoundedCornerShape(4.dp)
-                        ) {
+                Spacer(modifier = Modifier.width(14.dp))
+
+                // Lesson Details
+                Column(modifier = Modifier.weight(1f)) {
+                    val displayTitle = remember(lesson.title) {
+                        lesson.title.replace(Regex("^\\d+\\s*[-–.]\\s*"), "").trim().ifBlank { lesson.title }
+                    }
+                    Text(
+                        text = displayTitle,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = if (lesson.isCompleted) FontWeight.Normal else FontWeight.SemiBold,
+                        color = if (lesson.isCompleted) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onSurface,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    Row(
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (lesson.durationMs > 0) {
+                            val totalSecs = lesson.durationMs / 1000
+                            val m = totalSecs / 60
+                            val s = totalSecs % 60
                             Text(
-                                text = "🎙️ مدبلج للعربية",
+                                text = String.format("%02d:%02d", m, s),
                                 style = MaterialTheme.typography.labelSmall,
-                                color = Color(0xFF047857),
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                color = MaterialTheme.colorScheme.outline
+                            )
+                        }
+
+                        if (lesson.sourceType == SourceType.YOUTUBE && lesson.hasOfflineVideo) {
+                            Surface(
+                                color = Color(0xFF10B981).copy(alpha = 0.18f),
+                                shape = RoundedCornerShape(4.dp)
+                            ) {
+                                Text(
+                                    text = "📥 أوفلاين 360p",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color(0xFF047857),
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+
+                        if (lesson.hasArabicAudio) {
+                            Surface(
+                                color = Color(0xFF10B981).copy(alpha = 0.2f),
+                                shape = RoundedCornerShape(4.dp)
+                            ) {
+                                Text(
+                                    text = "🎙️ مدبلج للعربية",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color(0xFF047857),
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+
+                        if (lesson.hasArabicSubtitles) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
+                                shape = RoundedCornerShape(4.dp)
+                            ) {
+                                Text(
+                                    text = "🇸🇦 ترجمة",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+
+                        if (lesson.hasEnglishSubtitles && lesson.sourceType == SourceType.YOUTUBE) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
+                                shape = RoundedCornerShape(4.dp)
+                            ) {
+                                Text(
+                                    text = "🇬🇧 EN",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.secondary,
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+
+                        if (lesson.lastPositionMs > 1000L && !lesson.isCompleted) {
+                            val posM = (lesson.lastPositionMs / 1000) / 60
+                            val posS = (lesson.lastPositionMs / 1000) % 60
+                            Text(
+                                text = String.format("توقفت عند %02d:%02d", posM, posS),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.tertiary
                             )
                         }
                     }
+                }
 
-                    if (lesson.hasArabicSubtitles) {
-                        Surface(
-                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
-                            shape = RoundedCornerShape(4.dp)
-                        ) {
-                            Text(
-                                text = "🇸🇦 ترجمة",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-                            )
+                Spacer(modifier = Modifier.width(6.dp))
+
+                // Bookmark Star Button (>=48dp touch target, TalkBack semantics, Haptic)
+                IconButton(
+                    onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onToggleBookmark(!lesson.isBookmarked)
+                    },
+                    modifier = Modifier
+                        .size(48.dp)
+                        .semantics {
+                            contentDescription = if (lesson.isBookmarked) "إزالة من المفضلة" else "إضافة إلى المفضلة"
                         }
-                    }
+                ) {
+                    Icon(
+                        imageVector = if (lesson.isBookmarked) Icons.Default.Star else Icons.Default.StarBorder,
+                        contentDescription = null,
+                        tint = if (lesson.isBookmarked) Color(0xFFF59E0B) else MaterialTheme.colorScheme.outline,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
 
-                    if (lesson.lastPositionMs > 1000L && !lesson.isCompleted) {
-                        val posM = (lesson.lastPositionMs / 1000) / 60
-                        val posS = (lesson.lastPositionMs / 1000) % 60
-                        Text(
-                            text = String.format("توقفت عند %02d:%02d", posM, posS),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.tertiary
-                        )
-                    }
+                // Completion Checkbox (>=48dp touch target, TalkBack semantics, Haptic)
+                Box(
+                    modifier = Modifier.size(48.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Checkbox(
+                        checked = lesson.isCompleted,
+                        onCheckedChange = { checked ->
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onToggleComplete(checked)
+                        },
+                        colors = CheckboxDefaults.colors(
+                            checkedColor = Color(0xFF10B981)
+                        ),
+                        modifier = Modifier.semantics {
+                            contentDescription = if (lesson.isCompleted) "تم إكمال الدرس" else "تعليم الدرس كمكتمل"
+                        }
+                    )
+                }
+
+                // Play Button (>=48dp touch target, TalkBack semantics)
+                IconButton(
+                    onClick = onClick,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .semantics {
+                            contentDescription = "تشغيل الدرس"
+                        }
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PlayCircle,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(34.dp)
+                    )
                 }
             }
 
-            Spacer(modifier = Modifier.width(6.dp))
-
-            // Bookmark Star Button (>=48dp touch target, TalkBack semantics, Haptic)
-            IconButton(
-                onClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onToggleBookmark(!lesson.isBookmarked)
-                },
-                modifier = Modifier
-                    .size(48.dp)
-                    .semantics {
-                        contentDescription = if (lesson.isBookmarked) "إزالة من المفضلة" else "إضافة إلى المفضلة"
+            if (lesson.sourceType == SourceType.YOUTUBE && lesson.isAvailable && lesson.remoteId != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                Spacer(modifier = Modifier.height(6.dp))
+                when {
+                    downloadState != null -> {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = downloadState.stage,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = "${(downloadState.progress * 100).toInt()}%",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                LinearProgressIndicator(
+                                    progress = { downloadState.progress.coerceIn(0f, 1f) },
+                                    modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp))
+                                )
+                            }
+                            TextButton(
+                                onClick = onCancelDownload,
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Text("إلغاء", color = MaterialTheme.colorScheme.error)
+                            }
+                        }
                     }
-            ) {
-                Icon(
-                    imageVector = if (lesson.isBookmarked) Icons.Default.Star else Icons.Default.StarBorder,
-                    contentDescription = null,
-                    tint = if (lesson.isBookmarked) Color(0xFFF59E0B) else MaterialTheme.colorScheme.outline,
-                    modifier = Modifier.size(24.dp)
-                )
-            }
 
-            // Completion Checkbox (>=48dp touch target, TalkBack semantics, Haptic)
-            Box(
-                modifier = Modifier.size(48.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Checkbox(
-                    checked = lesson.isCompleted,
-                    onCheckedChange = { checked ->
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onToggleComplete(checked)
-                    },
-                    colors = CheckboxDefaults.colors(
-                        checkedColor = Color(0xFF10B981)
-                    ),
-                    modifier = Modifier.semantics {
-                        contentDescription = if (lesson.isCompleted) "تم إكمال الدرس" else "تعليم الدرس كمكتمل"
+                    lesson.hasOfflineVideo -> {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Icon(Icons.Default.OfflinePin, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(18.dp))
+                                Text(
+                                    text = "متاح بدون إنترنت (360p) • بالمشغل المحلي",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color(0xFF047857),
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                            TextButton(
+                                onClick = onRequestRemoveOffline,
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Text("حذف التحميل", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                            }
+                        }
                     }
-                )
-            }
 
-            // Play Button (>=48dp touch target, TalkBack semantics)
-            IconButton(
-                onClick = onClick,
-                modifier = Modifier
-                    .size(48.dp)
-                    .semantics {
-                        contentDescription = "تشغيل الدرس"
+                    else -> {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            FilledTonalButton(
+                                onClick = onDownloadClick,
+                                shape = RoundedCornerShape(10.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                modifier = Modifier.heightIn(min = 38.dp)
+                            ) {
+                                Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("تحميل أوفلاين (360p) + الترجمة", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
                     }
-            ) {
-                Icon(
-                    imageVector = Icons.Default.PlayCircle,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(34.dp)
-                )
+                }
             }
         }
     }

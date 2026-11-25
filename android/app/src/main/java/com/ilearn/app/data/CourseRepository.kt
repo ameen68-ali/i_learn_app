@@ -5,6 +5,8 @@ import android.net.Uri
 import com.ilearn.app.importer.CourseArchiveImporter
 import com.ilearn.app.importer.ImportState
 import com.ilearn.app.utils.AudioExtractorHelper
+import com.ilearn.app.youtube.LessonDownloadState
+import com.ilearn.app.youtube.YouTubeOfflineDownloader
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,6 +20,7 @@ class CourseRepository(private val context: Context) {
 
     val dbHelper = CourseDatabaseHelper(context)
     val importer = CourseArchiveImporter(context, dbHelper)
+    private val youtubeDownloader = YouTubeOfflineDownloader(context, dbHelper)
 
     private val scope = CoroutineScope(Dispatchers.IO)
 
@@ -31,6 +34,8 @@ class CourseRepository(private val context: Context) {
     val stats: StateFlow<StudyStats> = _stats.asStateFlow()
 
     val importState: StateFlow<ImportState> = importer.importState
+    val lessonDownloads: StateFlow<Map<String, LessonDownloadState>> = youtubeDownloader.downloads
+    val lessonDownloadErrors: StateFlow<Map<String, String>> = youtubeDownloader.errors
 
     init {
         // Listen to database updates reactively
@@ -162,12 +167,34 @@ class CourseRepository(private val context: Context) {
         importer.resetState()
     }
 
+    fun startYouTubeLessonDownload(lesson: Lesson) {
+        youtubeDownloader.startDownload(lesson)
+    }
+
+    fun cancelYouTubeLessonDownload(lessonId: String) {
+        youtubeDownloader.cancelDownload(lessonId)
+    }
+
+    fun dismissDownloadError(lessonId: String) {
+        youtubeDownloader.dismissError(lessonId)
+    }
+
+    suspend fun removeOfflineYouTubeVideo(lesson: Lesson): Boolean {
+        return youtubeDownloader.removeOfflineVideo(lesson)
+    }
+
     suspend fun deleteCourse(course: Course) = withContext(Dispatchers.IO) {
+        val root = (context.getExternalFilesDir(null)?.let { File(it, "courses") }
+            ?: File(context.filesDir, "courses")).canonicalFile
         if (course.sourceType == SourceType.LOCAL) {
-            val root = File(context.getExternalFilesDir(null), "courses").canonicalFile
             val folder = File(course.folderPath).canonicalFile
             require(folder != root && folder.path.startsWith(root.path + File.separator)) { "Invalid course storage path" }
             if (folder.exists()) check(folder.deleteRecursively()) { "Unable to delete course files" }
+        } else if (course.sourceType == SourceType.YOUTUBE) {
+            val offlineFolder = YouTubeOfflineDownloader.courseDirFor(root, course.id).canonicalFile
+            if (offlineFolder != root && offlineFolder.path.startsWith(root.path + File.separator) && offlineFolder.exists()) {
+                offlineFolder.deleteRecursively()
+            }
         }
         dbHelper.deleteCourse(course.id)
     }
