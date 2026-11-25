@@ -167,7 +167,7 @@ fun YouTubeLessonScreen(
                     navigationIcon = {
                         IconButton(
                             onClick = onBack,
-                            modifier = Modifier.size(48.dp).semantics { contentDescription = "Back" }
+                            modifier = Modifier.size(48.dp).semantics { contentDescription = "رجوع" }
                         ) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
                         }

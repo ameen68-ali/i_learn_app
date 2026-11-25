@@ -127,6 +127,8 @@ fun VideoPlayerScreen(
     val audioTrackMode by playerController.audioTrackMode.collectAsState()
     val playbackSpeed by playerController.playbackSpeed.collectAsState()
     val isPlaying by playerController.isPlaying.collectAsState()
+    val isBuffering by playerController.isBuffering.collectAsState()
+    val playerError by playerController.playerError.collectAsState()
     val currentPosition by playerController.currentPosition.collectAsState()
     val duration by playerController.duration.collectAsState()
 

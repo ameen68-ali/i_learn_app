@@ -81,6 +81,7 @@ fun CourseCatalogScreen(
     var storageCoursesSize by remember { mutableLongStateOf(0L) }
     var storageCacheSize by remember { mutableLongStateOf(0L) }
     var courseToDelete by remember { mutableStateOf<Course?>(null) }
+    var persistentImportError by remember { mutableStateOf<String?>(null) }
 
     // File Pickers with Graceful Cancellation
     val archivePickerLauncher = rememberLauncherForActivityResult(

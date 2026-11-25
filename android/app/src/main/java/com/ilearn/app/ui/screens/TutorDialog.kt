@@ -381,8 +381,8 @@ fun TutorDialog(
                                     showOptionsSheet = true
                                 }
                             },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                            modifier = Modifier.height(28.dp)
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            modifier = Modifier.heightIn(min = 40.dp)
                         ) {
                             Text(
                                 text = profile?.name ?: "إعداد المزوّد",

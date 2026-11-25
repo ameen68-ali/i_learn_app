@@ -121,7 +121,7 @@ class LessonSourcesTest {
             val course = com.ilearn.app.data.Course(
                 id = "youtube:PLtest",
                 title = "ML: Linear Algebra?",
-                folderUri = "youtube://playlist/PLtest",
+                folderPath = "youtube://playlist/PLtest",
                 sourceType = com.ilearn.app.data.SourceType.YOUTUBE
             )
             val incompleteLessons = listOf(

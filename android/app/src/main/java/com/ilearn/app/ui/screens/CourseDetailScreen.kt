@@ -319,14 +319,14 @@ fun CourseDetailScreen(
                                     IconButton(
                                         onClick = { showCelebrationDialog = true },
                                         modifier = Modifier
-                                            .size(36.dp)
+                                            .size(44.dp)
                                             .semantics { contentDescription = "عرض وسام إتمام الكورس" }
                                     ) {
                                         Icon(
                                             Icons.Default.EmojiEvents,
                                             contentDescription = null,
                                             tint = Color(0xFFF59E0B),
-                                            modifier = Modifier.size(20.dp)
+                                            modifier = Modifier.size(22.dp)
                                         )
                                     }
                                 }
@@ -334,7 +334,7 @@ fun CourseDetailScreen(
                                     text = "$progressPct%",
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.ExtraBold,
-                                    color = if (progressPct == 100) Color(0xFF10B981) else MaterialTheme.colorScheme.primary
+                                    color = if (progressPct == 100) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary
                                 )
                             }
                         }
