@@ -100,7 +100,6 @@ class YouTubeOfflineDownloader(
                 updateCourseProgress(course.id, 0.02f, "جاري تحميل الفيديو الكامل (360p) مرة واحدة…", -1L)
 
                 val fullVideo = download360pWithRetry(
-                    jobKey = course.id,
                     videoId = videoId,
                     tempDir = tempDir,
                     procId = procId,
@@ -210,7 +209,6 @@ class YouTubeOfflineDownloader(
                 updateProgress(lesson.id, 0.02f, "جاري تحميل الفيديو (360p)…", -1L)
 
                 val downloadedVideo = download360pWithRetry(
-                    jobKey = lesson.id,
                     videoId = videoId,
                     tempDir = tempDir,
                     procId = procId,
@@ -314,7 +312,6 @@ class YouTubeOfflineDownloader(
     }
 
     private fun download360pWithRetry(
-        jobKey: String,
         videoId: String,
         tempDir: File,
         procId: String,

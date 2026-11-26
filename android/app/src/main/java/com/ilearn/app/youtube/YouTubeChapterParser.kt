@@ -92,50 +92,44 @@ object YouTubeChapterParser {
     ): List<VideoChapter> {
         if (rawMarkers.isEmpty()) return emptyList()
 
-        // Keep the longest strictly increasing timestamp chain to reject scattered non-chapter notes.
-        val sorted = mutableListOf<Pair<Long, String>>()
+        // Keep strictly ascending markers before filtering out micro-transitions (<15s apart).
+        val ascending = mutableListOf<Pair<Long, String>>()
         for ((ts, title) in rawMarkers) {
             if (videoDurationMs > 0L && ts >= videoDurationMs - 2_000L) continue
-            val lastTs = sorted.lastOrNull()?.first ?: -1L
+            val lastTs = ascending.lastOrNull()?.first ?: -1L
             if (ts > lastTs) {
-                sorted.add(ts to title)
+                ascending.add(ts to title)
             }
         }
-        if (sorted.size < 2) return emptyList()
+        if (ascending.size < 2) return emptyList()
 
-        val withIntro = if (sorted.first().first > 0L) {
-            listOf(0L to "المقدمة • Intro") + sorted
-        } else {
-            sorted
+        val anchored = when {
+            ascending.first().first == 0L -> ascending
+            ascending.first().first < MIN_CHAPTER_MS ->
+                listOf(0L to ascending.first().second) + ascending.drop(1)
+            else -> listOf(0L to "المقدمة • Intro") + ascending
         }
+
+        val spaced = mutableListOf<Pair<Long, String>>()
+        for ((idx, item) in anchored.withIndex()) {
+            if (spaced.isEmpty()) {
+                spaced.add(item)
+            } else if (item.first - spaced.last().first >= MIN_CHAPTER_MS || (spaced.size == 1 && idx == anchored.lastIndex)) {
+                spaced.add(item)
+            }
+        }
+        if (spaced.size < 2) return emptyList()
 
         val resolvedEnd = if (videoDurationMs > 0L) videoDurationMs else Long.MAX_VALUE
         val chapters = mutableListOf<VideoChapter>()
-        for (i in withIntro.indices) {
-            val (startMs, rawTitle) = withIntro[i]
-            val nextStart = if (i + 1 < withIntro.size) withIntro[i + 1].first else resolvedEnd
-            val endMs = nextStart.coerceAtLeast(startMs)
-            if (endMs - startMs < MIN_CHAPTER_MS && i < withIntro.lastIndex) {
-                continue
-            }
-            val title = rawTitle.ifBlank { "الفصل ${chapters.size + 1}" }
+        for (i in spaced.indices) {
+            val (startMs, rawTitle) = spaced[i]
+            val nextStart = if (i + 1 < spaced.size) spaced[i + 1].first else resolvedEnd
+            val endMs = if (nextStart == Long.MAX_VALUE) startMs + 600_000L else nextStart.coerceAtLeast(startMs)
+            val title = rawTitle.ifBlank { "الفصل ${i + 1}" }
             chapters.add(VideoChapter(title = title, startMs = startMs, endMs = endMs))
         }
-
-        if (chapters.size < 2) return emptyList()
-        return if (videoDurationMs <= 0L) {
-            // Without known total video duration, infer final bounded duration or exclude open tail?
-            // Use startMs + 10 min only as placeholder if unknown; API path always sets durationMs.
-            chapters.mapIndexed { idx, ch ->
-                if (idx == chapters.lastIndex && ch.endMs == Long.MAX_VALUE) {
-                    ch.copy(endMs = ch.startMs + 600_000L)
-                } else {
-                    ch
-                }
-            }
-        } else {
-            chapters
-        }
+        return chapters
     }
 
     /**
