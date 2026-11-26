@@ -22,7 +22,7 @@ class CourseDatabaseHelper(context: Context, databaseName: String = DATABASE_NAM
 
     companion object {
         private const val DATABASE_NAME = "ilearn.db"
-        private const val DATABASE_VERSION = 5
+        private const val DATABASE_VERSION = 6
 
         // Tables
         private const val TABLE_COURSES = "courses"
@@ -119,6 +119,7 @@ class CourseDatabaseHelper(context: Context, databaseName: String = DATABASE_NAM
             )
         """)
         addSourceColumns(db)
+        addClipColumns(db)
         createStudyPackTables(db)
     }
 
@@ -151,6 +152,10 @@ class CourseDatabaseHelper(context: Context, databaseName: String = DATABASE_NAM
 
         if (oldVersion < 5) {
             createStudyPackTables(db)
+        }
+
+        if (oldVersion < 6) {
+            addClipColumns(db)
         }
     }
 
@@ -189,6 +194,15 @@ class CourseDatabaseHelper(context: Context, databaseName: String = DATABASE_NAM
         db.execSQL("ALTER TABLE lessons ADD COLUMN source_type TEXT NOT NULL DEFAULT 'LOCAL'")
         db.execSQL("ALTER TABLE lessons ADD COLUMN remote_id TEXT")
         db.execSQL("ALTER TABLE lessons ADD COLUMN available INTEGER NOT NULL DEFAULT 1")
+    }
+
+    private fun addClipColumns(db: SQLiteDatabase) {
+        try {
+            db.execSQL("ALTER TABLE lessons ADD COLUMN clip_start_ms INTEGER NOT NULL DEFAULT 0")
+        } catch (_: Exception) {}
+        try {
+            db.execSQL("ALTER TABLE lessons ADD COLUMN clip_end_ms INTEGER")
+        } catch (_: Exception) {}
     }
 
     private fun upsert(db: SQLiteDatabase, table: String, values: ContentValues) {
@@ -269,12 +283,23 @@ class CourseDatabaseHelper(context: Context, databaseName: String = DATABASE_NAM
                     put("source_type", lesson.sourceType.name)
                     put("remote_id", lesson.remoteId)
                     put("available", if (lesson.isAvailable) 1 else 0)
+                    put("clip_start_ms", lesson.clipStartMs)
+                    if (lesson.clipEndMs != null) put("clip_end_ms", lesson.clipEndMs) else putNull("clip_end_ms")
                 }
                 if (course.sourceType == SourceType.YOUTUBE) {
                     upsertRemoteLessonPreservingOfflineMedia(db, lessonValues)
                 } else {
                     upsert(db, TABLE_LESSONS, lessonValues)
                 }
+            }
+            if (course.sourceType == SourceType.YOUTUBE && course.remoteId?.startsWith("video_") == true && lessons.isNotEmpty()) {
+                val keepIds = lessons.map { it.id }.toSet()
+                val placeholders = keepIds.joinToString(",") { "?" }
+                val args = arrayOf(course.id) + keepIds.toTypedArray()
+                db.execSQL(
+                    "DELETE FROM $TABLE_LESSONS WHERE $COL_COURSE_ID = ? AND $COL_ID NOT IN ($placeholders) AND COALESCE($COL_VIDEO_PATH, '') = '' AND NOT EXISTS (SELECT 1 FROM $TABLE_NOTES n WHERE n.$COL_LESSON_ID = $TABLE_LESSONS.$COL_ID)",
+                    args
+                )
             }
             db.setTransactionSuccessful()
         } finally {
@@ -335,7 +360,8 @@ class CourseDatabaseHelper(context: Context, databaseName: String = DATABASE_NAM
                    l.$COL_VIDEO_PATH, l.$COL_SUB_AR_PATH, l.$COL_SUB_EN_PATH, l.$COL_AUDIO_AR_PATH, l.$COL_DURATION_MS,
                    COALESCE(p.$COL_IS_COMPLETED, 0) as is_completed,
                    COALESCE(p.$COL_LAST_POSITION_MS, 0) as last_position_ms,
-                   COALESCE(p.$COL_IS_BOOKMARKED, 0) as is_bookmarked, l.source_type, l.remote_id, l.available
+                   COALESCE(p.$COL_IS_BOOKMARKED, 0) as is_bookmarked, l.source_type, l.remote_id, l.available,
+                   l.clip_start_ms, l.clip_end_ms
             FROM $TABLE_LESSONS l
             LEFT JOIN $TABLE_PROGRESS p ON l.$COL_ID = p.$COL_LESSON_ID
             WHERE l.$COL_COURSE_ID = ?
@@ -361,7 +387,9 @@ class CourseDatabaseHelper(context: Context, databaseName: String = DATABASE_NAM
                         isBookmarked = it.getInt(11) == 1,
                         sourceType = SourceType.valueOf(it.getString(12)),
                         remoteId = it.getString(13),
-                        isAvailable = it.getInt(14) == 1
+                        isAvailable = it.getInt(14) == 1,
+                        clipStartMs = it.getLong(15),
+                        clipEndMs = if (it.isNull(16)) null else it.getLong(16)
                     )
                 )
             }

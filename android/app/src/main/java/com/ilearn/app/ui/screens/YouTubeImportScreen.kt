@@ -51,9 +51,19 @@ fun YouTubeImportScreen(
 
     val scope = rememberCoroutineScope()
     val context = LocalContext.current.applicationContext
-    var url by remember { mutableStateOf(initialPlaylist?.let { "https://www.youtube.com/playlist?list=$it" } ?: "") }
+    var url by remember {
+        mutableStateOf(
+            when {
+                initialPlaylist == null -> ""
+                initialPlaylist.startsWith("video_") && initialPlaylist.length == 17 ->
+                    "https://www.youtube.com/watch?v=${initialPlaylist.removePrefix("video_")}"
+                else -> "https://www.youtube.com/playlist?list=$initialPlaylist"
+            }
+        )
+    }
     var apiKey by remember { mutableStateOf(builtInApiKey) }
     var preview by remember { mutableStateOf<PlaylistPreview?>(null) }
+    var splitIntoChapters by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
     var job by remember { mutableStateOf<Job?>(null) }
@@ -61,7 +71,7 @@ fun YouTubeImportScreen(
     var showUrlError by remember { mutableStateOf(false) }
     var hadUrlFocus by remember { mutableStateOf(false) }
 
-    val parsedPlaylistId = remember(url) { PlaylistUrlParser.parse(url) }
+    val parsedTarget = remember(url) { PlaylistUrlParser.parseTarget(url) }
 
     Scaffold(
         topBar = {
@@ -70,7 +80,7 @@ fun YouTubeImportScreen(
                     Column {
                         Text("إضافة كورس من YouTube", fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(
-                            text = if (initialPlaylist != null) "تحديث قائمة التشغيل" else "استيراد قائمة تشغيل تعليمية",
+                            text = if (initialPlaylist != null) "تحديث بيانات الكورس" else "استيراد قائمة تشغيل أو فيديو مقسّم لفصول",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -122,12 +132,12 @@ fun YouTubeImportScreen(
                     Spacer(modifier = Modifier.width(12.dp))
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(
-                            text = "حوّل أي قائمة تشغيل يوتيوب إلى كورس منظم",
+                            text = "حوّل قوائم التشغيل أو الفيديوهات الطويلة إلى دروس",
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "تُحفظ دروسك وتقدّم المشاهدة والملاحظات محلياً على جهازك، مع تشغيل الفيديو عبر الإنترنت والمعلّم الذكي.",
+                            text = "تُكتشف فصول الفيديو الطويل تلقائياً لتقسيمه إلى دروس مستقلة تعمل أونلاين أو تُقسم أوفلاين (360p) مع المعلّم الذكي.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             lineHeight = 18.sp
@@ -137,33 +147,36 @@ fun YouTubeImportScreen(
             }
 
             fun startPreview() {
-                if (busy || apiKey.isBlank() || parsedPlaylistId == null) return
+                if (busy || apiKey.isBlank() || parsedTarget == null) return
                 showUrlError = true
                 job = scope.launch {
                     busy = true
                     errorMessage = null
-                    statusMessage = "جاري جلب بيانات قائمة التشغيل…"
+                    statusMessage = "جاري جلب البيانات واكتشاف الدروس والفصول…"
                     preview = null
                     try {
-                        preview = YouTubeMetadataClient(context).preview(url, apiKey)
-                        statusMessage = if (preview?.lessons.isNullOrEmpty()) {
-                            "قائمة التشغيل لا تحتوي على دروس"
-                        } else {
-                            "راجِع الدروس قبل إضافتها للمكتبة"
+                        val loadedPreview = YouTubeMetadataClient(context).preview(url, apiKey)
+                        preview = loadedPreview
+                        splitIntoChapters = loadedPreview.detectedChaptersCount >= 2
+                        statusMessage = when {
+                            loadedPreview.lessons.isEmpty() -> "لم يُعثر على دروس متاحة"
+                            loadedPreview.detectedChaptersCount >= 2 ->
+                                "تم اكتشاف ${loadedPreview.detectedChaptersCount} فصلاً داخل الفيديو — راجِعها قبل الإضافة"
+                            else -> "راجِع الدروس قبل إضافتها للمكتبة"
                         }
                     } catch (e: CancellationException) {
                         statusMessage = "تم إلغاء المعاينة"
                         throw e
                     } catch (e: Exception) {
                         statusMessage = null
-                        errorMessage = e.message ?: "تعذّر تحميل قائمة التشغيل"
+                        errorMessage = e.message ?: "تعذّر تحميل الرابط"
                     } finally {
                         busy = false
                     }
                 }
             }
 
-            val isUrlInvalid = url.isNotBlank() && parsedPlaylistId == null && (showUrlError || url.length > 35)
+            val isUrlInvalid = url.isNotBlank() && parsedTarget == null && (showUrlError || url.length > 35)
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -173,8 +186,8 @@ fun YouTubeImportScreen(
                 OutlinedTextField(
                     value = url,
                     onValueChange = { url = it.take(2000); preview = null; errorMessage = null; statusMessage = null },
-                    label = { Text("رابط قائمة التشغيل • YouTube playlist") },
-                    placeholder = { Text("https://www.youtube.com/playlist?list=...") },
+                    label = { Text("رابط قائمة تشغيل أو فيديو • YouTube URL") },
+                    placeholder = { Text("https://www.youtube.com/playlist?list=... أو watch?v=...") },
                     leadingIcon = { Icon(Icons.Default.Link, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
                     trailingIcon = {
                         if (url.isNotEmpty() && !busy) {
@@ -185,7 +198,7 @@ fun YouTubeImportScreen(
                     },
                     supportingText = {
                         if (isUrlInvalid) {
-                            Text("أدخل رابط قائمة تشغيل YouTube صحيح بصيغة HTTPS يحتوي على list=", color = MaterialTheme.colorScheme.error)
+                            Text("أدخل رابط YouTube صحيحاً بصيغة HTTPS (قائمة تشغيل أو فيديو)", color = MaterialTheme.colorScheme.error)
                         }
                     },
                     isError = isUrlInvalid,
@@ -204,7 +217,7 @@ fun YouTubeImportScreen(
                 )
 
                 FilledIconButton(
-                    enabled = !busy && apiKey.isNotBlank() && parsedPlaylistId != null,
+                    enabled = !busy && apiKey.isNotBlank() && parsedTarget != null,
                     onClick = { startPreview() },
                     modifier = Modifier
                         .padding(top = 6.dp)
@@ -283,7 +296,7 @@ fun YouTubeImportScreen(
                             style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.weight(1f)
                         )
-                        if (parsedPlaylistId != null && apiKey.isNotBlank()) {
+                        if (parsedTarget != null && apiKey.isNotBlank()) {
                             IconButton(
                                 onClick = { startPreview() },
                                 modifier = Modifier.size(44.dp).semantics { contentDescription = "إعادة المحاولة" }
@@ -302,6 +315,13 @@ fun YouTubeImportScreen(
             }
 
             preview?.let { result ->
+                val shownLessons = remember(result, splitIntoChapters) {
+                    if (result.detectedChaptersCount >= 2 && !splitIntoChapters && result.unsplitFallbackLesson != null) {
+                        listOf(result.unsplitFallbackLesson)
+                    } else {
+                        result.lessons
+                    }
+                }
                 ElevatedCard(
                     shape = RoundedCornerShape(20.dp),
                     colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
@@ -320,7 +340,7 @@ fun YouTubeImportScreen(
                                 modifier = Modifier.weight(1f)
                             )
                             FilledIconButton(
-                                enabled = !busy && result.lessons.isNotEmpty(),
+                                enabled = !busy && shownLessons.isNotEmpty(),
                                 onClick = {
                                     job = scope.launch {
                                         busy = true
@@ -329,7 +349,7 @@ fun YouTubeImportScreen(
                                             val existing = repository.courses.value.firstOrNull { it.id == result.course.id }
                                             repository.dbHelper.insertCourseWithLessons(
                                                 result.course.copy(dateAdded = existing?.dateAdded ?: result.course.dateAdded),
-                                                result.lessons
+                                                shownLessons
                                             )
                                             repository.refreshData()
                                             onImported(result.course.id)
@@ -350,14 +370,51 @@ fun YouTubeImportScreen(
                             }
                         }
 
+                        if (result.detectedChaptersCount >= 2 && result.unsplitFallbackLesson != null) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "تقسيم الفيديو حسب الفصول",
+                                            style = MaterialTheme.typography.labelLarge,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Text(
+                                            text = if (splitIntoChapters) {
+                                                "سيُضاف كـ ${result.detectedChaptersCount} درساً مستقلاً"
+                                            } else {
+                                                "سيُضاف كدرس واحد كامل"
+                                            },
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    Switch(
+                                        checked = splitIntoChapters,
+                                        onCheckedChange = { splitIntoChapters = it }
+                                    )
+                                }
+                            }
+                        }
+
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            val availableCount = result.lessons.count { it.isAvailable }
+                            val availableCount = shownLessons.count { it.isAvailable }
                             Surface(
                                 color = MaterialTheme.colorScheme.primaryContainer,
                                 shape = RoundedCornerShape(8.dp)
                             ) {
                                 Text(
-                                    text = "${result.lessons.size} درس",
+                                    text = "${shownLessons.size} درس",
                                     style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.onPrimaryContainer,
                                     fontWeight = FontWeight.Bold,
@@ -380,14 +437,14 @@ fun YouTubeImportScreen(
 
                         HorizontalDivider()
 
-                        if (result.lessons.isEmpty()) {
+                        if (shownLessons.isEmpty()) {
                             Text(
-                                text = "لم يُعثر على دروس متاحة داخل هذه القائمة.",
+                                text = "لم يُعثر على دروس متاحة داخل هذا الرابط.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         } else {
-                            result.lessons.take(12).forEach { lesson ->
+                            shownLessons.take(12).forEach { lesson ->
                             Row(
                                 modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
                                 verticalAlignment = Alignment.CenterVertically
@@ -414,7 +471,11 @@ fun YouTubeImportScreen(
                                 if (lesson.durationMs > 0) {
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        text = formatTimeMs(lesson.durationMs),
+                                        text = if (lesson.isChapterClip) {
+                                            "${formatTimeMs(lesson.clipStartMs)} • ${formatTimeMs(lesson.durationMs)}"
+                                        } else {
+                                            formatTimeMs(lesson.durationMs)
+                                        },
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -422,9 +483,9 @@ fun YouTubeImportScreen(
                             }
                         }
 
-                        if (result.lessons.size > 12) {
+                        if (shownLessons.size > 12) {
                             Text(
-                                text = "… و ${result.lessons.size - 12} درساً إضافياً",
+                                text = "… و ${shownLessons.size - 12} درساً إضافياً",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

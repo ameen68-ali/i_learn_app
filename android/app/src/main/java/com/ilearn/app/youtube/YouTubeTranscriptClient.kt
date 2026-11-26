@@ -77,6 +77,17 @@ class YouTubeTranscriptClient(baseClient: OkHttpClient = sharedClient) {
         arVtt to enVtt
     }
 
+    suspend fun fetchAutoChapters(videoId: String, videoDurationMs: Long): List<VideoChapter> = withContext(Dispatchers.IO) {
+        require(videoId.matches(Regex("[A-Za-z0-9_-]{11}"))) { "Invalid YouTube video ID" }
+        val html = executeGet(
+            url = "https://www.youtube.com/watch?v=$videoId",
+            userAgent = DESKTOP_UA,
+            acceptLanguage = "en-US,en;q=0.9,ar;q=0.8",
+            maxBytes = 4_000_000
+        )
+        YouTubeChapterParser.parseChaptersFromWatchHtml(html, videoDurationMs)
+    }
+
     suspend fun downloadAsVtt(track: YouTubeCaptionTrack): String = withContext(Dispatchers.IO) {
         validateTrackUrl(track.baseUrl)
         val json3Url = setFormatParam(track.baseUrl, "json3")

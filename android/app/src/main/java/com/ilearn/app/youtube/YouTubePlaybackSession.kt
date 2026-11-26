@@ -24,7 +24,11 @@ import org.json.JSONTokener
 
 /** No JavascriptInterface is exposed. Poll only the app-owned wrapper's bounded state. */
 class YouTubePlaybackSession(private val context: Context, private val lesson: Lesson) : LessonPlaybackSession {
-    private val mutable = MutableStateFlow(LessonPlaybackState(lesson.id, durationMs = lesson.durationMs))
+    private val clipStartMs: Long = lesson.clipStartMs.coerceAtLeast(0L)
+    private val clipEndMs: Long? = lesson.clipEndMs?.takeIf { it > clipStartMs }
+    private val clipDurationMs: Long? = clipEndMs?.let { (it - clipStartMs).coerceAtLeast(0L) }
+
+    private val mutable = MutableStateFlow(LessonPlaybackState(lesson.id, durationMs = clipDurationMs ?: lesson.durationMs))
     override val state: StateFlow<LessonPlaybackState> = mutable
     private var container: FrameLayout? = null
     private var view: WebView? = null

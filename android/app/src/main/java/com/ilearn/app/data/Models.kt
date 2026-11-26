@@ -49,7 +49,9 @@ data class Lesson(
     val isBookmarked: Boolean = false,
     val sourceType: SourceType = SourceType.LOCAL,
     val remoteId: String? = null,
-    val isAvailable: Boolean = true
+    val isAvailable: Boolean = true,
+    val clipStartMs: Long = 0L,
+    val clipEndMs: Long? = null
 ) {
     val hasArabicSubtitles: Boolean
         get() = !subArPath.isNullOrBlank()
@@ -62,6 +64,9 @@ data class Lesson(
 
     val hasOfflineVideo: Boolean
         get() = videoPath.isNotBlank() && java.io.File(videoPath).isFile
+
+    val isChapterClip: Boolean
+        get() = clipStartMs > 0L || (clipEndMs != null && clipEndMs > clipStartMs)
 }
 
 /**
