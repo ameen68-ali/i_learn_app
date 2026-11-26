@@ -74,8 +74,30 @@ fun TranscriptSheet(
                 emptyList()
             }
 
-            arLines = ar
-            enLines = if (en.isNotEmpty()) en else fallback
+            if (ar.isEmpty() && en.isEmpty() && fallback.isEmpty() &&
+                lesson.sourceType == com.ilearn.app.data.SourceType.YOUTUBE && !lesson.remoteId.isNullOrBlank()
+            ) {
+                val (rawAr, rawEn) = com.ilearn.app.youtube.YouTubeTranscriptClient().downloadPreferredTracksAsVtt(lesson.remoteId)
+                val slicedAr = rawAr?.let { vtt ->
+                    if (lesson.isChapterClip) {
+                        com.ilearn.app.youtube.YouTubeChapterParser.sliceAndRebaseVtt(vtt, lesson.clipStartMs, lesson.clipEndMs)
+                    } else vtt
+                }
+                val slicedEn = rawEn?.let { vtt ->
+                    if (lesson.isChapterClip) {
+                        com.ilearn.app.youtube.YouTubeChapterParser.sliceAndRebaseVtt(vtt, lesson.clipStartMs, lesson.clipEndMs)
+                    } else vtt
+                }
+                arLines = slicedAr?.let { runCatching { TranscriptParser.parseLines(it, "vtt") }.getOrDefault(emptyList()) }.orEmpty()
+                enLines = slicedEn?.let { runCatching { TranscriptParser.parseLines(it, "vtt") }.getOrDefault(emptyList()) }.orEmpty()
+                val preferredRaw = slicedAr ?: slicedEn
+                if (!preferredRaw.isNullOrBlank()) {
+                    runCatching { LessonSourceStore(context).saveTranscript(lesson, preferredRaw, "vtt", "YouTube captions") }
+                }
+            } else {
+                arLines = ar
+                enLines = if (en.isNotEmpty()) en else fallback
+            }
             selectedLang = if (arLines.isNotEmpty()) "ar" else "en"
             loaded = true
         }

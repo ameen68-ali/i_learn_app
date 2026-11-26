@@ -544,7 +544,8 @@ class CourseDatabaseHelper(context: Context, databaseName: String = DATABASE_NAM
                    c.$COL_TITLE as course_title,
                    l.$COL_ORDER_INDEX, l.$COL_TITLE as lesson_title,
                    l.$COL_VIDEO_PATH, l.$COL_SUB_AR_PATH, l.$COL_SUB_EN_PATH, l.$COL_AUDIO_AR_PATH, l.$COL_DURATION_MS,
-                   p.$COL_IS_COMPLETED, p.$COL_IS_BOOKMARKED, l.source_type, l.remote_id, l.available
+                   p.$COL_IS_COMPLETED, p.$COL_IS_BOOKMARKED, l.source_type, l.remote_id, l.available,
+                   l.clip_start_ms, l.clip_end_ms
             FROM $TABLE_PROGRESS p
             JOIN $TABLE_COURSES c ON p.$COL_COURSE_ID = c.$COL_ID
             JOIN $TABLE_LESSONS l ON p.$COL_LESSON_ID = l.$COL_ID
@@ -585,7 +586,9 @@ class CourseDatabaseHelper(context: Context, databaseName: String = DATABASE_NAM
                     isBookmarked = isBook,
                     sourceType = SourceType.valueOf(it.getString(14)),
                     remoteId = it.getString(15),
-                    isAvailable = it.getInt(16) == 1
+                    isAvailable = it.getInt(16) == 1,
+                    clipStartMs = it.getLong(17),
+                    clipEndMs = if (it.isNull(18)) null else it.getLong(18)
                 )
 
                 return@withContext ResumeLessonInfo(
@@ -798,7 +801,9 @@ class CourseDatabaseHelper(context: Context, databaseName: String = DATABASE_NAM
                     .put("lessons", JSONArray().apply {
                         getLessonsForCourse(course.id).forEach { lesson ->
                             put(JSONObject().put("id", lesson.id).put("title", lesson.title).put("videoId", lesson.remoteId)
-                                .put("order", lesson.orderIndex).put("durationMs", lesson.durationMs).put("available", lesson.isAvailable))
+                                .put("order", lesson.orderIndex).put("durationMs", lesson.durationMs).put("available", lesson.isAvailable)
+                                .put("clipStartMs", lesson.clipStartMs)
+                                .apply { if (lesson.clipEndMs != null) put("clipEndMs", lesson.clipEndMs) })
                         }
                     }))
             }
@@ -886,11 +891,17 @@ class CourseDatabaseHelper(context: Context, databaseName: String = DATABASE_NAM
                 val l = lessons.getJSONObject(j); val lessonId = l.getString("id")
                 require(lessonId.startsWith("$id:") && lessonId.removePrefix("$id:").matches(Regex("[A-Za-z0-9_-]{1,200}")))
                 val video = l.optString("videoId").takeIf { it.matches(Regex("[A-Za-z0-9_-]{11}")) }
+                val clipStartMs = l.optLong("clipStartMs", 0L).coerceAtLeast(0L)
+                val clipEndMs = if (l.has("clipEndMs") && !l.isNull("clipEndMs")) {
+                    l.optLong("clipEndMs", -1L).takeIf { it > clipStartMs }
+                } else null
                 require(l.getString("title").length <= 1000 && l.getInt("order") >= 0 && l.optLong("durationMs", 0L) >= 0)
                 val values = ContentValues().apply {
                     put("id", lessonId); put("course_id", id); put("order_index", l.getInt("order")); put("title", l.getString("title"))
                     put("video_path", ""); put("duration_ms", l.optLong("durationMs", 0L)); put("source_type", "YOUTUBE")
                     put("remote_id", video); put("available", if (video != null && l.optBoolean("available", true)) 1 else 0)
+                    put("clip_start_ms", clipStartMs)
+                    if (clipEndMs != null) put("clip_end_ms", clipEndMs) else putNull("clip_end_ms")
                 }
                 if (existingSync <= incomingSync) upsertRemoteLessonPreservingOfflineMedia(db, values)
                 else db.insertWithOnConflict(TABLE_LESSONS, null, values, SQLiteDatabase.CONFLICT_IGNORE)

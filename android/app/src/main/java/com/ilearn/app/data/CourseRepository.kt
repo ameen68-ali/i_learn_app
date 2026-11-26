@@ -53,6 +53,8 @@ class CourseRepository(
     val importState: StateFlow<ImportState> = importer.importState
     val lessonDownloads: StateFlow<Map<String, LessonDownloadState>> = youtubeDownloader.downloads
     val lessonDownloadErrors: StateFlow<Map<String, String>> = youtubeDownloader.errors
+    val courseDownloads: StateFlow<Map<String, LessonDownloadState>> = youtubeDownloader.courseDownloads
+    val courseDownloadErrors: StateFlow<Map<String, String>> = youtubeDownloader.courseErrors
 
     private val _translatingLessons = MutableStateFlow<Map<String, LessonDownloadState>>(emptyMap())
     val translatingLessons: StateFlow<Map<String, LessonDownloadState>> = _translatingLessons.asStateFlow()
@@ -202,6 +204,18 @@ class CourseRepository(
         youtubeDownloader.dismissError(lessonId)
     }
 
+    fun startChapteredCourseDownload(course: Course, lessons: List<Lesson>) {
+        youtubeDownloader.startChapteredCourseDownload(course, lessons)
+    }
+
+    fun cancelChapteredCourseDownload(courseId: String) {
+        youtubeDownloader.cancelCourseDownload(courseId)
+    }
+
+    fun dismissCourseDownloadError(courseId: String) {
+        youtubeDownloader.dismissCourseError(courseId)
+    }
+
     suspend fun removeOfflineYouTubeVideo(lesson: Lesson): Boolean {
         return youtubeDownloader.removeOfflineVideo(lesson)
     }
@@ -294,7 +308,17 @@ class CourseRepository(
 
         if (sourceText.isNullOrBlank() && lesson.sourceType == SourceType.YOUTUBE && !lesson.remoteId.isNullOrBlank()) {
             onProgress(0.05f, "جاري جلب الترجمة الإنجليزية من يوتيوب…")
-            val (arFromYt, enFromYt) = transcriptClient.downloadPreferredTracksAsVtt(lesson.remoteId)
+            val (rawArFromYt, rawEnFromYt) = transcriptClient.downloadPreferredTracksAsVtt(lesson.remoteId)
+            val arFromYt = if (lesson.isChapterClip && !rawArFromYt.isNullOrBlank()) {
+                com.ilearn.app.youtube.YouTubeChapterParser.sliceAndRebaseVtt(rawArFromYt, lesson.clipStartMs, lesson.clipEndMs)
+            } else {
+                rawArFromYt
+            }
+            val enFromYt = if (lesson.isChapterClip && !rawEnFromYt.isNullOrBlank()) {
+                com.ilearn.app.youtube.YouTubeChapterParser.sliceAndRebaseVtt(rawEnFromYt, lesson.clipStartMs, lesson.clipEndMs)
+            } else {
+                rawEnFromYt
+            }
             val enSaved = enFromYt?.let { vtt ->
                 File(courseDir, "subtitles_en").apply { mkdirs() }
                     .let { dir -> File(dir, "$stem.vtt").apply { writeText(vtt, Charsets.UTF_8) } }

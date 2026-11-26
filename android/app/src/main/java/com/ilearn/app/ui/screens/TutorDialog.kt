@@ -115,9 +115,15 @@ fun TutorDialog(
                 infoBanner = "لا توجد ترجمة متاحة لهذا الفيديو على يوتيوب. يمكنك إرفاق ملف نصي أو تفعيل المساعدة العامة."
                 return
             }
-            val vtt = withContext(Dispatchers.IO) { transcriptClient.downloadAsVtt(chosen) }
+            val rawVtt = withContext(Dispatchers.IO) { transcriptClient.downloadAsVtt(chosen) }
+            val scopedVtt = if (lesson.isChapterClip) {
+                com.ilearn.app.youtube.YouTubeChapterParser.sliceAndRebaseVtt(rawVtt, lesson.clipStartMs, lesson.clipEndMs)
+                    ?: error("لا توجد عبارات ترجمة ضمن نطاق هذا الفصل")
+            } else {
+                rawVtt
+            }
             val label = "YouTube: ${chosen.name}"
-            withContext(Dispatchers.IO) { sourceStore.saveTranscript(lesson, vtt, "vtt", label) }
+            withContext(Dispatchers.IO) { sourceStore.saveTranscript(lesson, scopedVtt, "vtt", label) }
             sources = withContext(Dispatchers.IO) { sourceStore.sources(lesson) }
             sourceLabel = label
             answer = ""

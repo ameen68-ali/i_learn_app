@@ -68,6 +68,8 @@ class MainActivity : ComponentActivity() {
                         val dbUpdates by repository.dbHelper.databaseUpdates.collectAsState()
                         val lessonDownloads by repository.lessonDownloads.collectAsState()
                         val lessonDownloadErrors by repository.lessonDownloadErrors.collectAsState()
+                        val courseDownloads by repository.courseDownloads.collectAsState()
+                        val courseDownloadErrors by repository.courseDownloadErrors.collectAsState()
                         val translatingLessons by repository.translatingLessons.collectAsState()
                         val translationErrors by repository.translationErrors.collectAsState()
                         val providerUpdates by providerProfiles.updates.collectAsState()
@@ -199,6 +201,17 @@ class MainActivity : ComponentActivity() {
                                         onSearchTranscripts = { q -> repository.searchCourseTranscripts(lessons, q) },
                                         onOpenTranscriptHit = { lesson, ts ->
                                             navController.navigate("player/${currentCourse.id}/${lesson.id}?seekMs=$ts")
+                                        },
+                                        courseDownloadState = courseDownloads[currentCourse.id],
+                                        courseDownloadError = courseDownloadErrors[currentCourse.id],
+                                        onDownloadChapteredCourse = {
+                                            repository.startChapteredCourseDownload(currentCourse, lessons)
+                                        },
+                                        onCancelChapteredCourseDownload = {
+                                            repository.cancelChapteredCourseDownload(currentCourse.id)
+                                        },
+                                        onDismissCourseDownloadError = {
+                                            repository.dismissCourseDownloadError(currentCourse.id)
                                         },
                                         onRefresh = { currentCourse.remoteId?.let { navController.navigate("youtube_import?playlist=$it") } },
                                         onBack = {

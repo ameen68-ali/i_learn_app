@@ -77,7 +77,12 @@ fun CourseDetailScreen(
     dueFlashcardsCount: Int = 0,
     onOpenDueFlashcards: () -> Unit = {},
     onSearchTranscripts: suspend (String) -> List<com.ilearn.app.data.TranscriptSearchHit> = { emptyList() },
-    onOpenTranscriptHit: (Lesson, Long) -> Unit = { lesson, _ -> onSelectLesson(lesson) }
+    onOpenTranscriptHit: (Lesson, Long) -> Unit = { lesson, _ -> onSelectLesson(lesson) },
+    courseDownloadState: LessonDownloadState? = null,
+    courseDownloadError: String? = null,
+    onDownloadChapteredCourse: () -> Unit = {},
+    onCancelChapteredCourseDownload: () -> Unit = {},
+    onDismissCourseDownloadError: () -> Unit = {}
 ) {
     var selectedFilter by remember { mutableStateOf(LessonFilter.ALL) }
     var searchQuery by remember { mutableStateOf("") }
@@ -139,6 +144,13 @@ fun CourseDetailScreen(
         if (firstEntry != null) {
             snackbarHostState.showSnackbar(firstEntry.value, duration = SnackbarDuration.Long)
             onDismissTranslationError(firstEntry.key)
+        }
+    }
+
+    LaunchedEffect(courseDownloadError) {
+        if (!courseDownloadError.isNullOrBlank()) {
+            snackbarHostState.showSnackbar(courseDownloadError, duration = SnackbarDuration.Long)
+            onDismissCourseDownloadError()
         }
     }
 
@@ -362,6 +374,36 @@ fun CourseDetailScreen(
                             Icon(Icons.Default.FolderZip, contentDescription = null, tint = Color(0xFF10B981))
                         }
                     }
+                    if (course.sourceType == com.ilearn.app.data.SourceType.YOUTUBE &&
+                        lessons.any { it.isChapterClip && it.isAvailable && !it.hasOfflineVideo }
+                    ) {
+                        if (courseDownloadState != null) {
+                            IconButton(
+                                onClick = onCancelChapteredCourseDownload,
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .semantics { contentDescription = "إلغاء تحميل وتقسيم الفصول" }
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    CircularProgressIndicator(
+                                        progress = { courseDownloadState.progress.coerceIn(0f, 1f) },
+                                        strokeWidth = 2.5.dp,
+                                        modifier = Modifier.size(28.dp)
+                                    )
+                                    Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.error)
+                                }
+                            }
+                        } else {
+                            IconButton(
+                                onClick = onDownloadChapteredCourse,
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .semantics { contentDescription = "تحميل وتقسيم كل الفصول (360p)" }
+                            ) {
+                                Icon(Icons.Default.DownloadForOffline, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                    }
                     if (course.sourceType == com.ilearn.app.data.SourceType.YOUTUBE) {
                         IconButton(
                             onClick = onRefresh,
@@ -384,6 +426,61 @@ fun CourseDetailScreen(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
+            courseDownloadState?.let { batch ->
+                item {
+                    ElevatedCard(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.elevatedCardColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = batch.stage.ifBlank { "جاري تجهيز وتقسيم الفصول…" },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "${(batch.progress * 100).toInt()}%",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                IconButton(
+                                    onClick = onCancelChapteredCourseDownload,
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .semantics { contentDescription = "إلغاء تحميل الكورس" }
+                                ) {
+                                    Icon(Icons.Default.Close, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
+                                }
+                            }
+                            LinearProgressIndicator(
+                                progress = { batch.progress.coerceIn(0f, 1f) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(6.dp)
+                                    .clip(RoundedCornerShape(3.dp))
+                            )
+                        }
+                    }
+                }
+            }
+
             // Course Summary & Progress Card
             item {
                 ElevatedCard(

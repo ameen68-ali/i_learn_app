@@ -89,11 +89,18 @@ object StudyPackGenerator {
             val tracks = withContext(Dispatchers.IO) { client.fetchTracks(lesson.remoteId) }
             val chosen = YouTubeTranscriptClient.choosePreferredTrack(tracks)
             if (chosen != null) {
-                val vtt = withContext(Dispatchers.IO) { client.downloadAsVtt(chosen) }
-                withContext(Dispatchers.IO) {
-                    sourceStore.saveTranscript(lesson, vtt, "vtt", "YouTube: ${chosen.name}")
+                val rawVtt = withContext(Dispatchers.IO) { client.downloadAsVtt(chosen) }
+                val scopedVtt = if (lesson.isChapterClip) {
+                    com.ilearn.app.youtube.YouTubeChapterParser.sliceAndRebaseVtt(rawVtt, lesson.clipStartMs, lesson.clipEndMs)
+                } else {
+                    rawVtt
                 }
-                passages = TranscriptParser.parse(vtt, "vtt")
+                if (!scopedVtt.isNullOrBlank()) {
+                    withContext(Dispatchers.IO) {
+                        sourceStore.saveTranscript(lesson, scopedVtt, "vtt", "YouTube: ${chosen.name}")
+                    }
+                    passages = TranscriptParser.parse(scopedVtt, "vtt")
+                }
             }
         }
 

@@ -158,4 +158,51 @@ class SourceDatabaseTest {
         context.deleteDatabase("ilearn-study-test.db")
         Unit
     }
+
+    @Test fun versionFiveToSixUpgradeAndChapterBackupRoundTripWorkCleanly() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val dbName = "ilearn-chapter-v6-test.db"
+        context.deleteDatabase(dbName)
+        val db = context.openOrCreateDatabase(dbName, 0, null)
+        db.execSQL("CREATE TABLE courses (id TEXT PRIMARY KEY, title TEXT NOT NULL, folder_path TEXT NOT NULL, date_added INTEGER NOT NULL, source_type TEXT NOT NULL DEFAULT 'LOCAL', remote_id TEXT, last_synced_at INTEGER NOT NULL DEFAULT 0)")
+        db.execSQL("CREATE TABLE lessons (id TEXT PRIMARY KEY, course_id TEXT NOT NULL, order_index INTEGER NOT NULL, title TEXT NOT NULL, video_path TEXT NOT NULL, sub_ar_path TEXT, sub_en_path TEXT, audio_ar_path TEXT, duration_ms INTEGER NOT NULL DEFAULT 0, source_type TEXT NOT NULL DEFAULT 'LOCAL', remote_id TEXT, available INTEGER NOT NULL DEFAULT 1)")
+        db.execSQL("CREATE TABLE student_progress (lesson_id TEXT PRIMARY KEY, course_id TEXT NOT NULL, is_completed INTEGER NOT NULL DEFAULT 0, last_position_ms INTEGER NOT NULL DEFAULT 0, total_duration_ms INTEGER NOT NULL DEFAULT 0, is_bookmarked INTEGER NOT NULL DEFAULT 0, last_watched_timestamp INTEGER NOT NULL DEFAULT 0)")
+        db.execSQL("CREATE TABLE lesson_notes (id TEXT PRIMARY KEY, lesson_id TEXT NOT NULL, course_id TEXT NOT NULL, timestamp_ms INTEGER NOT NULL, note_text TEXT NOT NULL, created_at INTEGER NOT NULL)")
+        db.execSQL("CREATE TABLE lesson_study_packs (lesson_id TEXT PRIMARY KEY, course_id TEXT NOT NULL, summary_markdown TEXT NOT NULL, quiz_json TEXT NOT NULL, created_at INTEGER NOT NULL)")
+        db.execSQL("CREATE TABLE flashcards (id TEXT PRIMARY KEY, lesson_id TEXT NOT NULL, course_id TEXT NOT NULL, front TEXT NOT NULL, back TEXT NOT NULL, timestamp_ms INTEGER, repetitions INTEGER NOT NULL DEFAULT 0, interval_days INTEGER NOT NULL DEFAULT 0, ease_factor REAL NOT NULL DEFAULT 2.5, due_at INTEGER NOT NULL)")
+        db.version = 5
+        db.close()
+
+        var helper = CourseDatabaseHelper(context, dbName)
+        val course = Course("youtube:video_abcdefghijk", "Full Calculus Lecture", "", sourceType = SourceType.YOUTUBE, remoteId = "video_abcdefghijk", lastSyncedAt = System.currentTimeMillis())
+        val ch1 = Lesson("${course.id}:ch_0", course.id, 1, "Limits", "", durationMs = 600_000L, sourceType = SourceType.YOUTUBE, remoteId = "abcdefghijk", clipStartMs = 0L, clipEndMs = 600_000L)
+        val ch2 = Lesson("${course.id}:ch_600000", course.id, 2, "Derivatives", "", durationMs = 900_000L, sourceType = SourceType.YOUTUBE, remoteId = "abcdefghijk", clipStartMs = 600_000L, clipEndMs = 1_500_000L)
+        helper.insertCourseWithLessons(course, listOf(ch1, ch2))
+        helper.updateLessonProgress(ch2.id, course.id, 120_000L, 900_000L)
+        helper.insertNote(LessonNote("n-ch2", ch2.id, course.id, 45_000L, "Chain rule note"))
+
+        val resume = helper.getResumeLesson()
+        assertNotNull(resume)
+        assertEquals(600_000L, resume!!.lesson.clipStartMs)
+        assertEquals(1_500_000L, resume.lesson.clipEndMs)
+
+        val backupJson = helper.exportProgressJson()
+        helper.close()
+        context.deleteDatabase(dbName)
+        helper = CourseDatabaseHelper(context, dbName)
+        assertTrue(helper.importProgressJson(backupJson))
+
+        val restoredLessons = helper.getLessonsForCourse(course.id)
+        assertEquals(2, restoredLessons.size)
+        assertEquals(0L, restoredLessons[0].clipStartMs)
+        assertEquals(600_000L, restoredLessons[0].clipEndMs)
+        assertEquals(600_000L, restoredLessons[1].clipStartMs)
+        assertEquals(1_500_000L, restoredLessons[1].clipEndMs)
+        assertEquals(120_000L, restoredLessons[1].lastPositionMs)
+        assertEquals("Chain rule note", helper.getNotesForLesson(ch2.id).single().noteText)
+
+        helper.close()
+        context.deleteDatabase(dbName)
+        Unit
+    }
 }

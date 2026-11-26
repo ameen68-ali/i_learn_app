@@ -108,10 +108,12 @@ class YouTubePlaybackSession(private val context: Context, private val lesson: L
     }
 
     private fun loadEmbedHtml(webView: WebView, videoId: String) {
-        val resumeMs = if (lesson.durationMs > 0L && lesson.lastPositionMs >= lesson.durationMs - 5000L) 0L else lesson.lastPositionMs
-        val start = (resumeMs / 1000).coerceAtLeast(0)
+        val baseDur = clipDurationMs ?: lesson.durationMs
+        val resumeRelMs = if (baseDur > 0L && lesson.lastPositionMs >= baseDur - 5000L) 0L else lesson.lastPositionMs
+        val start = ((clipStartMs + resumeRelMs) / 1000L).coerceAtLeast(0L)
         val origin = "https://${context.packageName}"
         val startLine = if (start > 0L) ",start:$start" else ""
+        val endLine = clipEndMs?.let { ",end:${((it + 999L) / 1000L).coerceAtLeast(start + 1L)}" }.orEmpty()
         webView.loadDataWithBaseURL(
             "$origin/",
             """
@@ -126,7 +128,7 @@ class YouTubePlaybackSession(private val context: Context, private val lesson: L
                 height:'100%',
                 width:'100%',
                 videoId:'$videoId',
-                playerVars:{playsinline:1,enablejsapi:1,rel:0,fs:1,origin:'$origin',widget_referrer:'$origin'$startLine},
+                playerVars:{playsinline:1,enablejsapi:1,rel:0,fs:1,origin:'$origin',widget_referrer:'$origin'$startLine$endLine},
                 events:{
                   onReady:function(){ready=true;},
                   onError:function(e){failure=(e&&e.data)?e.data:5;}
@@ -155,7 +157,7 @@ class YouTubePlaybackSession(private val context: Context, private val lesson: L
         val w = view ?: return
         val videoId = lesson.remoteId ?: return
         if (released) return
-        mutable.value = LessonPlaybackState(lesson.id, durationMs = lesson.durationMs)
+        mutable.value = LessonPlaybackState(lesson.id, durationMs = clipDurationMs ?: lesson.durationMs)
         loadEmbedHtml(w, videoId)
     }
 
@@ -170,16 +172,21 @@ class YouTubePlaybackSession(private val context: Context, private val lesson: L
         mutable.value = mutable.value.copy(playing = false)
     }
 
+    private fun toGlobalSeekMs(relativePositionMs: Long): Long {
+        val maxRel = state.value.durationMs.takeIf { it > 0L } ?: clipDurationMs ?: lesson.durationMs
+        val clamped = if (maxRel > 0L) relativePositionMs.coerceIn(0L, maxRel) else relativePositionMs.coerceAtLeast(0L)
+        val globalTarget = clipStartMs + clamped
+        return clipEndMs?.let { minOf(globalTarget, (it - 500L).coerceAtLeast(clipStartMs)) } ?: globalTarget
+    }
+
     override fun seek(positionMs: Long) {
-        val maxDur = state.value.durationMs.takeIf { it > 0L } ?: lesson.durationMs
-        val position = if (maxDur > 0L) positionMs.coerceIn(0, maxDur) else positionMs.coerceAtLeast(0)
-        js("if(ready&&player){player.seekTo(${position / 1000.0},true);}")
+        val globalPos = toGlobalSeekMs(positionMs)
+        js("if(ready&&player){player.seekTo(${globalPos / 1000.0},true);}")
     }
 
     fun seekAndPlay(positionMs: Long) {
-        val maxDur = state.value.durationMs.takeIf { it > 0L } ?: lesson.durationMs
-        val position = if (maxDur > 0L) positionMs.coerceIn(0, maxDur) else positionMs.coerceAtLeast(0)
-        js("if(ready&&player){player.seekTo(${position / 1000.0},true);player.playVideo();}")
+        val globalPos = toGlobalSeekMs(positionMs)
+        js("if(ready&&player){player.seekTo(${globalPos / 1000.0},true);player.playVideo();}")
     }
 
     fun onHostPause() {
@@ -206,12 +213,23 @@ class YouTubePlaybackSession(private val context: Context, private val lesson: L
                 val loadedVideo = json.optString("video")
                 val matchesLesson = loadedVideo.isEmpty() || loadedVideo == lesson.remoteId
                 val reportedDurationMs = (duration * 1000).toLong()
-                val effectiveDurationMs = if (reportedDurationMs > 0L) reportedDurationMs else lesson.durationMs
+                val rawPosMs = (pos * 1000).toLong()
+                val effectiveDurationMs = clipDurationMs
+                    ?: if (reportedDurationMs > 0L) (reportedDurationMs - clipStartMs).coerceAtLeast(0L) else lesson.durationMs
+                val reachedClipEnd = clipEndMs != null && rawPosMs >= clipEndMs && matchesLesson
+                if (reachedClipEnd && json.optBoolean("playing")) {
+                    pause()
+                }
+                val relPosMs = if (reachedClipEnd) {
+                    effectiveDurationMs
+                } else {
+                    (rawPosMs - clipStartMs).coerceIn(0L, effectiveDurationMs.takeIf { it > 0L } ?: Long.MAX_VALUE)
+                }
                 mutable.value = LessonPlaybackState(
                     lessonId = lesson.id,
                     ready = json.optBoolean("ready") && code == 0 && matchesLesson,
-                    playing = json.optBoolean("playing") && code == 0 && matchesLesson,
-                    positionMs = (pos * 1000).toLong(),
+                    playing = json.optBoolean("playing") && !reachedClipEnd && code == 0 && matchesLesson,
+                    positionMs = relPosMs,
                     durationMs = effectiveDurationMs,
                     error = if (code == 0) null else formatPlayerError(code)
                 )
