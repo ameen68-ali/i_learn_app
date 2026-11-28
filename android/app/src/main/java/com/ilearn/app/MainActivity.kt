@@ -213,6 +213,9 @@ class MainActivity : ComponentActivity() {
                                         onDismissCourseDownloadError = {
                                             repository.dismissCourseDownloadError(currentCourse.id)
                                         },
+                                        onReverseOrder = {
+                                            lifecycleScope.launch { repository.reverseCourseOrder(currentCourse.id) }
+                                        },
                                         onRefresh = { currentCourse.remoteId?.let { navController.navigate("youtube_import?playlist=$it") } },
                                         onBack = {
                                             playerController.pause()

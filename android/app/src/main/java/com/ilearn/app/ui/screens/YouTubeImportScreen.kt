@@ -30,6 +30,8 @@ import com.ilearn.app.BuildConfig
 import com.ilearn.app.data.CourseRepository
 import com.ilearn.app.youtube.PlaylistPreview
 import com.ilearn.app.youtube.PlaylistUrlParser
+import com.ilearn.app.youtube.YouTubeChapterParser
+import com.ilearn.app.youtube.YouTubeImportTarget
 import com.ilearn.app.youtube.YouTubeMetadataClient
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -64,6 +66,10 @@ fun YouTubeImportScreen(
     var apiKey by remember { mutableStateOf(builtInApiKey) }
     var preview by remember { mutableStateOf<PlaylistPreview?>(null) }
     var splitIntoChapters by remember { mutableStateOf(true) }
+    var preferPlaylistMode by remember { mutableStateOf(false) }
+    var reverseOrder by remember { mutableStateOf(false) }
+    var showManualChapters by remember { mutableStateOf(false) }
+    var manualChaptersText by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
     var job by remember { mutableStateOf<Job?>(null) }
@@ -146,22 +152,33 @@ fun YouTubeImportScreen(
                 }
             }
 
-            fun startPreview() {
+            fun startPreview(preferPlaylist: Boolean = preferPlaylistMode) {
                 if (busy || apiKey.isBlank() || parsedTarget == null) return
                 showUrlError = true
+                preferPlaylistMode = preferPlaylist
                 job = scope.launch {
                     busy = true
                     errorMessage = null
                     statusMessage = "جاري جلب البيانات واكتشاف الدروس والفصول…"
                     preview = null
+                    manualChaptersText = ""
+                    showManualChapters = false
+                    reverseOrder = false
                     try {
-                        val loadedPreview = YouTubeMetadataClient(context).preview(url, apiKey)
+                        val loadedPreview = YouTubeMetadataClient(context).preview(
+                            url = url,
+                            apiKey = apiKey,
+                            preferPlaylistWhenBothPresent = preferPlaylist
+                        )
                         preview = loadedPreview
                         splitIntoChapters = loadedPreview.detectedChaptersCount >= 2
+                        showManualChapters = loadedPreview.isSingleVideo && loadedPreview.detectedChaptersCount == 0
                         statusMessage = when {
                             loadedPreview.lessons.isEmpty() -> "لم يُعثر على دروس متاحة"
                             loadedPreview.detectedChaptersCount >= 2 ->
                                 "تم اكتشاف ${loadedPreview.detectedChaptersCount} فصلاً داخل الفيديو — راجِعها قبل الإضافة"
+                            loadedPreview.isSingleVideo ->
+                                "لم يُعثر على فصول تلقائياً — يمكنك لصق التوقيتات يدوياً أو استيراده كدرس واحد"
                             else -> "راجِع الدروس قبل إضافتها للمكتبة"
                         }
                     } catch (e: CancellationException) {
@@ -185,13 +202,34 @@ fun YouTubeImportScreen(
             ) {
                 OutlinedTextField(
                     value = url,
-                    onValueChange = { url = it.take(2000); preview = null; errorMessage = null; statusMessage = null },
+                    onValueChange = {
+                        url = it.take(2000)
+                        preview = null
+                        errorMessage = null
+                        statusMessage = null
+                        preferPlaylistMode = false
+                        manualChaptersText = ""
+                        showManualChapters = false
+                        reverseOrder = false
+                    },
                     label = { Text("رابط قائمة تشغيل أو فيديو • YouTube URL") },
                     placeholder = { Text("https://www.youtube.com/playlist?list=... أو watch?v=...") },
                     leadingIcon = { Icon(Icons.Default.Link, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
                     trailingIcon = {
                         if (url.isNotEmpty() && !busy) {
-                            IconButton(onClick = { url = ""; showUrlError = false; preview = null; errorMessage = null; statusMessage = null }) {
+                            IconButton(
+                                onClick = {
+                                    url = ""
+                                    showUrlError = false
+                                    preview = null
+                                    errorMessage = null
+                                    statusMessage = null
+                                    preferPlaylistMode = false
+                                    manualChaptersText = ""
+                                    showManualChapters = false
+                                    reverseOrder = false
+                                }
+                            ) {
                                 Icon(Icons.Default.Close, contentDescription = "مسح الرابط")
                             }
                         }
@@ -225,6 +263,42 @@ fun YouTubeImportScreen(
                         .semantics { contentDescription = "معاينة الكورس" }
                 ) {
                     Icon(Icons.AutoMirrored.Filled.PlaylistPlay, contentDescription = null)
+                }
+            }
+
+            if (parsedTarget is YouTubeImportTarget.VideoAndPlaylist) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilterChip(
+                        selected = !preferPlaylistMode,
+                        enabled = !busy,
+                        onClick = {
+                            if (preferPlaylistMode) {
+                                preferPlaylistMode = false
+                                if (preview != null) startPreview(false)
+                            }
+                        },
+                        label = { Text("فصول الفيديو فقط", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        leadingIcon = if (!preferPlaylistMode) {
+                            { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                        } else null
+                    )
+                    FilterChip(
+                        selected = preferPlaylistMode,
+                        enabled = !busy,
+                        onClick = {
+                            if (!preferPlaylistMode) {
+                                preferPlaylistMode = true
+                                if (preview != null) startPreview(true)
+                            }
+                        },
+                        label = { Text("القائمة كاملة", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        leadingIcon = if (preferPlaylistMode) {
+                            { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                        } else null
+                    )
                 }
             }
 
@@ -315,11 +389,58 @@ fun YouTubeImportScreen(
             }
 
             preview?.let { result ->
-                val shownLessons = remember(result, splitIntoChapters) {
-                    if (result.detectedChaptersCount >= 2 && !splitIntoChapters && result.unsplitFallbackLesson != null) {
-                        listOf(result.unsplitFallbackLesson)
+                val manualChapters = remember(result, manualChaptersText) {
+                    if (result.isSingleVideo && manualChaptersText.isNotBlank()) {
+                        YouTubeChapterParser.parseChaptersFromDescription(
+                            manualChaptersText,
+                            videoDurationMs = result.fullVideoDurationMs
+                        )
                     } else {
-                        result.lessons
+                        emptyList()
+                    }
+                }
+                val manualChapterLessons = remember(result, manualChapters) {
+                    val base = result.unsplitFallbackLesson
+                    if (base != null && manualChapters.size >= 2) {
+                        manualChapters.mapIndexed { idx, ch ->
+                            base.copy(
+                                id = "${result.course.id}:ch_${ch.startMs}",
+                                orderIndex = idx + 1,
+                                title = ch.title,
+                                durationMs = (ch.endMs - ch.startMs).coerceAtLeast(0L),
+                                clipStartMs = ch.startMs,
+                                clipEndMs = ch.endMs
+                            )
+                        }
+                    } else {
+                        emptyList()
+                    }
+                }
+                val effectiveChaptersCount = if (manualChapterLessons.size >= 2) {
+                    manualChapterLessons.size
+                } else {
+                    result.detectedChaptersCount
+                }
+                val baseLessons = remember(result, splitIntoChapters, manualChapterLessons) {
+                    when {
+                        result.isSingleVideo && manualChapterLessons.size >= 2 ->
+                            if (splitIntoChapters || result.unsplitFallbackLesson == null) {
+                                manualChapterLessons
+                            } else {
+                                listOf(result.unsplitFallbackLesson)
+                            }
+                        result.detectedChaptersCount >= 2 && !splitIntoChapters && result.unsplitFallbackLesson != null ->
+                            listOf(result.unsplitFallbackLesson)
+                        else -> result.lessons
+                    }
+                }
+                val shownLessons = remember(baseLessons, reverseOrder) {
+                    if (!reverseOrder || baseLessons.size < 2) {
+                        baseLessons
+                    } else {
+                        baseLessons.reversed().mapIndexed { index, lesson ->
+                            lesson.copy(orderIndex = index + 1)
+                        }
                     }
                 }
                 ElevatedCard(
@@ -370,7 +491,90 @@ fun YouTubeImportScreen(
                             }
                         }
 
-                        if (result.detectedChaptersCount >= 2 && result.unsplitFallbackLesson != null) {
+                        if (result.isSingleVideo && result.unsplitFallbackLesson != null) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                shape = RoundedCornerShape(12.dp),
+                                onClick = { showManualChapters = !showManualChapters },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.FormatListNumbered,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "لصق توقيتات الفصول يدوياً",
+                                            style = MaterialTheme.typography.labelLarge,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Text(
+                                            text = if (manualChapterLessons.size >= 2) {
+                                                "مفعّل: ${manualChapterLessons.size} فصلاً مخصّصاً"
+                                            } else {
+                                                "مفيد إذا كانت الفصول في تعليق مثبّت فقط"
+                                            },
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    Icon(
+                                        imageVector = if (showManualChapters) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                        contentDescription = if (showManualChapters) "إخفاء التوقيتات اليدوية" else "إظهار التوقيتات اليدوية"
+                                    )
+                                }
+                            }
+
+                            if (showManualChapters) {
+                                OutlinedTextField(
+                                    value = manualChaptersText,
+                                    onValueChange = { updated ->
+                                        manualChaptersText = updated.take(20_000)
+                                        if (YouTubeChapterParser.parseChaptersFromDescription(
+                                                updated,
+                                                result.fullVideoDurationMs
+                                            ).size >= 2
+                                        ) {
+                                            splitIntoChapters = true
+                                        }
+                                    },
+                                    label = { Text("توقيتات الفصول (سطر لكل فصل)") },
+                                    placeholder = { Text("00:00 المقدمة\n12:30 الدرس الثاني\n28:45 أمثلة") },
+                                    supportingText = {
+                                        Text(
+                                            text = when {
+                                                manualChapterLessons.size >= 2 ->
+                                                    "تم التعرف على ${manualChapterLessons.size} فصلاً — جاهز للاستيراد كدروس مقسّمة"
+                                                manualChaptersText.isNotBlank() ->
+                                                    "أضف سطرين على الأقل بصيغة 00:00 عنوان الفصل"
+                                                else ->
+                                                    "انسخ التوقيتات من وصف الفيديو أو أول تعليق مثبّت ثم الصقها هنا"
+                                            },
+                                            color = if (manualChapterLessons.size >= 2) {
+                                                MaterialTheme.colorScheme.primary
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                            }
+                                        )
+                                    },
+                                    enabled = !busy,
+                                    minLines = 3,
+                                    maxLines = 6,
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        }
+
+                        if (effectiveChaptersCount >= 2 && result.unsplitFallbackLesson != null) {
                             Surface(
                                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                                 shape = RoundedCornerShape(12.dp),
@@ -391,7 +595,7 @@ fun YouTubeImportScreen(
                                         )
                                         Text(
                                             text = if (splitIntoChapters) {
-                                                "سيُضاف كـ ${result.detectedChaptersCount} درساً مستقلاً"
+                                                "سيُضاف كـ $effectiveChaptersCount درساً مستقلاً"
                                             } else {
                                                 "سيُضاف كدرس واحد كامل"
                                             },
@@ -402,6 +606,48 @@ fun YouTubeImportScreen(
                                     Switch(
                                         checked = splitIntoChapters,
                                         onCheckedChange = { splitIntoChapters = it }
+                                    )
+                                }
+                            }
+                        }
+
+                        if (baseLessons.size >= 2) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.SwapVert,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "عكس ترتيب الدروس",
+                                            style = MaterialTheme.typography.labelLarge,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Text(
+                                            text = if (reverseOrder) {
+                                                "الترتيب معكوس (${baseLessons.size} ← 1)"
+                                            } else {
+                                                "الترتيب الأصلي من يوتيوب (1 ← ${baseLessons.size})"
+                                            },
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    Switch(
+                                        checked = reverseOrder,
+                                        onCheckedChange = { reverseOrder = it }
                                     )
                                 }
                             }

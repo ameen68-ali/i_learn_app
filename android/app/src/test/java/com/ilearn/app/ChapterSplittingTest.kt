@@ -101,4 +101,63 @@ class ChapterSplittingTest {
         assertTrue(sliced.contains("00:05:12.000 --> 00:05:16.000"))
         assertTrue(sliced.contains("Second chapter concept"))
     }
+
+    @Test fun parsesMixQueueAsSingleVideoAndExplicitPlaylistAsDualModeAndExtractsShareUrl() {
+        assertEquals(
+            YouTubeImportTarget.Video("fNk_zzaMoSs"),
+            PlaylistUrlParser.parseTarget("https://www.youtube.com/watch?v=fNk_zzaMoSs&list=RDfNk_zzaMoSs&start_radio=1")
+        )
+        assertEquals(
+            YouTubeImportTarget.Video("fNk_zzaMoSs"),
+            PlaylistUrlParser.parseTarget("https://www.youtube.com/watch?v=fNk_zzaMoSs&list=WL&index=2")
+        )
+        assertEquals(
+            YouTubeImportTarget.VideoAndPlaylist("fNk_zzaMoSs", "PLZHQObOWTQDPD3MizzM2xVFitgF8hE_ab"),
+            PlaylistUrlParser.parseTarget("https://www.youtube.com/watch?v=fNk_zzaMoSs&list=PLZHQObOWTQDPD3MizzM2xVFitgF8hE_ab&index=1")
+        )
+        assertEquals(
+            YouTubeImportTarget.Video("fNk_zzaMoSs"),
+            PlaylistUrlParser.parseTarget("Calculus Full Lecture:\nhttps://youtu.be/fNk_zzaMoSs?si=test123")
+        )
+    }
+
+    @Test fun parsesDescriptionChaptersWithEmojisBidiArabicDigitsAndRanges() {
+        val desc = """
+            ⏱️ 00:00 المقدمة
+            🔹 ${"\u200F"}٠٥:٣٠ - ١٥:٠٠ المعادلات الخطية
+            Chapter 3: 15:00 - 30:00 التطبيقات
+        """.trimIndent()
+
+        val chapters = YouTubeChapterParser.parseChaptersFromDescription(desc, videoDurationMs = 2_400_000L)
+        assertEquals(3, chapters.size)
+        assertEquals("المقدمة", chapters[0].title)
+        assertEquals(0L, chapters[0].startMs)
+        assertEquals(330_000L, chapters[0].endMs)
+
+        assertEquals("المعادلات الخطية", chapters[1].title)
+        assertEquals(330_000L, chapters[1].startMs)
+        assertEquals(900_000L, chapters[1].endMs)
+
+        assertEquals("التطبيقات", chapters[2].title)
+        assertEquals(900_000L, chapters[2].startMs)
+        assertEquals(2_400_000L, chapters[2].endMs)
+    }
+
+    @Test fun parsesMacroMarkersListItemRendererChaptersCleanly() {
+        val html = """
+            <html><script>var ytInitialData = {"macroMarkersListEntity":{"markersList":{"markers":[
+                {"macroMarkersListItemRenderer": {"title":{"simpleText":"Part One"},"onTap":{"watchEndpoint":{"startTimeSeconds":0}}}},
+                {"macroMarkersListItemRenderer": {"title":{"runs":[{"text":"Part Two"}]},"timeDescription":{"simpleText":"05:00"}}}
+            ]}}};</script></html>
+        """.trimIndent()
+
+        val chapters = YouTubeChapterParser.parseChaptersFromWatchHtml(html, videoDurationMs = 900_000L)
+        assertEquals(2, chapters.size)
+        assertEquals("Part One", chapters[0].title)
+        assertEquals(0L, chapters[0].startMs)
+        assertEquals(300_000L, chapters[0].endMs)
+        assertEquals("Part Two", chapters[1].title)
+        assertEquals(300_000L, chapters[1].startMs)
+        assertEquals(900_000L, chapters[1].endMs)
+    }
 }

@@ -18,6 +18,23 @@ object YouTubeChapterParser {
 
     private const val MIN_CHAPTER_MS = 15_000L
     private val TIMESTAMP_TOKEN = Regex("(?:(\\d{1,2}):)?(\\d{1,2}):([0-5]\\d)")
+    private val TRAILING_RANGE_TIMESTAMP = Regex("^[-–—~to\\s]+(?:\\d{1,2}:)?\\d{1,2}:[0-5]\\d\\b")
+    private val BIDI_AND_INVISIBLE = Regex("[\\u200E\\u200F\\u202A-\\u202E\\u2066-\\u2069\\uFEFF]")
+    private val CHAPTER_KEY_REGEX = Regex("\"(chapterRenderer|macroMarkersListItemRenderer)\"\\s*:")
+
+    fun normalizeDigitsAndBidi(raw: String): String {
+        val stripped = raw.replace(BIDI_AND_INVISIBLE, "")
+        val sb = StringBuilder(stripped.length)
+        for (ch in stripped) {
+            val mapped = when (ch) {
+                in '٠'..'٩' -> ('0' + (ch - '٠'))
+                in '۰'..'۹' -> ('0' + (ch - '۰'))
+                else -> ch
+            }
+            sb.append(mapped)
+        }
+        return sb.toString()
+    }
 
     fun parseChaptersFromDescription(
         description: String,
@@ -25,25 +42,34 @@ object YouTubeChapterParser {
     ): List<VideoChapter> {
         if (description.isBlank()) return emptyList()
         val rawMarkers = mutableListOf<Pair<Long, String>>()
+        val normalizedDesc = normalizeDigitsAndBidi(description.replace("\r\n", "\n"))
 
-        for (rawLine in description.replace("\r\n", "\n").lines()) {
+        for (rawLine in normalizedDesc.lines()) {
             val line = rawLine.trim()
             if (line.isBlank()) continue
             val match = TIMESTAMP_TOKEN.find(line) ?: continue
-            // Only treat as chapter line if timestamp sits near the start or end after stripping bullets.
+
             val before = line.substring(0, match.range.first).trim()
-            val after = line.substring(match.range.last + 1).trim()
-            val startsNearLeft = before.isEmpty() || before.matches(Regex("[\\d.\\-)(\\[\\]•*\\s]{1,12}"))
-            val endsNearRight = after.isEmpty() || after.matches(Regex("[\\])\\s-]{1,6}"))
-            if (!startsNearLeft && !endsNearRight) continue
+            val afterRaw = line.substring(match.range.last + 1).trim()
+            val after = afterRaw.replace(TRAILING_RANGE_TIMESTAMP, "").trim()
+
+            // Accept lines where the timestamp sits near the beginning (allowing emojis, numbers, or short chapter labels)
+            // OR at the end of a short chapter title like "Introduction (00:00)".
+            val prefixLooksLikeMarker = before.length <= 32 && before.split(Regex("\\s+")).size <= 5
+            val suffixIsEndOfLine = after.isEmpty() || after.matches(Regex("[\\])\\s.,-]{1,6}"))
+            if (!prefixLooksLikeMarker && !suffixIsEndOfLine) continue
 
             val startMs = parseTimestampMs(match) ?: continue
             if (videoDurationMs > 0L && startMs >= videoDurationMs - 2_000L) continue
 
-            val rawTitle = if (before.length > 12 || after.isNotBlank() && !endsNearRight) {
-                (if (!before.matches(Regex("[\\d.\\-)(\\[\\]•*\\s]*"))) "$before " else "") + after
-            } else {
-                before.replace(Regex("^[\\d]+\\s*[.\\-)]\\s*"), "")
+            val prefixClean = before.replace(Regex("^(?:[\\d]+[.)\\-]|[-•*📌🔹⏱️🎬]+)\\s*"), "").trim()
+            val rawTitle = when {
+                after.isNotBlank() && !suffixIsEndOfLine -> {
+                    val usefulPrefix = prefixClean
+                        .takeIf { it.isNotBlank() && !it.matches(Regex("^(?:chapter|part|lesson|lecture|الفصل|الدرس)\\s*\\d*[:\\-–]?$", RegexOption.IGNORE_CASE)) }
+                    if (usefulPrefix != null) "$usefulPrefix — $after" else after
+                }
+                else -> before.replace(Regex("^[\\d]+\\s*[.)\\-]\\s*"), "")
             }
             val cleanedTitle = rawTitle
                 .replace(Regex("^[\\s\\-–—:|•*\\]\\)]+"), "")
@@ -61,29 +87,36 @@ object YouTubeChapterParser {
         videoDurationMs: Long
     ): List<VideoChapter> {
         if (html.isBlank()) return emptyList()
-        val markers = mutableListOf<Pair<Long, String>>()
-        val chapterKey = "\"chapterRenderer\":"
-        var cursor = 0
-        while (true) {
-            val idx = html.indexOf(chapterKey, cursor)
-            if (idx < 0) break
-            val objStart = idx + chapterKey.length
-            val jsonSlice = extractBalancedJsonObject(html, objStart)
-            if (jsonSlice != null) {
-                runCatching {
-                    val obj = JSONObject(jsonSlice)
+        val chapterRendererMarkers = mutableListOf<Pair<Long, String>>()
+        val macroMarkers = mutableListOf<Pair<Long, String>>()
+
+        for (match in CHAPTER_KEY_REGEX.findAll(html)) {
+            val rendererType = match.groupValues[1]
+            val objStart = match.range.last + 1
+            val jsonSlice = extractBalancedJsonObject(html, objStart) ?: continue
+            runCatching {
+                val obj = JSONObject(jsonSlice)
+                val title = extractRunsOrSimpleText(obj.optJSONObject("title")).trim().take(180)
+                if (title.isBlank()) return@runCatching
+                if (rendererType == "chapterRenderer") {
                     val startMs = obj.optLong("timeRangeStartMillis", -1L)
-                    val title = extractRunsOrSimpleText(obj.optJSONObject("title")).trim().take(180)
-                    if (startMs >= 0L && title.isNotBlank()) {
-                        markers.add(startMs to title)
+                    if (startMs >= 0L) chapterRendererMarkers.add(startMs to title)
+                } else {
+                    val startSecs = obj.optJSONObject("onTap")
+                        ?.optJSONObject("watchEndpoint")
+                        ?.optLong("startTimeSeconds", -1L) ?: -1L
+                    val startMs = if (startSecs >= 0L) {
+                        startSecs * 1000L
+                    } else {
+                        val timeText = extractRunsOrSimpleText(obj.optJSONObject("timeDescription"))
+                        TIMESTAMP_TOKEN.find(timeText)?.let { parseTimestampMs(it) } ?: -1L
                     }
+                    if (startMs >= 0L) macroMarkers.add(startMs to title)
                 }
-                cursor = objStart + jsonSlice.length
-            } else {
-                cursor = objStart + 1
             }
         }
-        return normalizeMarkers(markers, videoDurationMs)
+        val preferred = if (chapterRendererMarkers.size >= 2) chapterRendererMarkers else macroMarkers
+        return normalizeMarkers(preferred, videoDurationMs)
     }
 
     fun normalizeMarkers(
@@ -200,7 +233,7 @@ object YouTubeChapterParser {
         var inString = false
         var escaped = false
         val start = i
-        while (i < source.length && i - start <= 4096) {
+        while (i < source.length && i - start <= 16_384) {
             val c = source[i]
             if (escaped) {
                 escaped = false

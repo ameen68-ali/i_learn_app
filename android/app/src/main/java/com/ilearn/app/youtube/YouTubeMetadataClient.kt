@@ -11,16 +11,38 @@ data class PlaylistPreview(
     val course: Course,
     val lessons: List<Lesson>,
     val detectedChaptersCount: Int = 0,
-    val unsplitFallbackLesson: Lesson? = null
+    val unsplitFallbackLesson: Lesson? = null,
+    val isSingleVideo: Boolean = false,
+    val fullVideoDurationMs: Long = 0L,
+    val alternatePlaylistId: String? = null,
+    val alternateVideoId: String? = null
 )
 
 class YouTubeMetadataClient(private val context: android.content.Context) {
     private val client = OkHttpClient.Builder().followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false)
         .callTimeout(30, TimeUnit.SECONDS).build()
 
-    suspend fun preview(url: String, apiKey: String): PlaylistPreview = withContext(Dispatchers.IO) {
-        val target = PlaylistUrlParser.parseTarget(url)
+    suspend fun preview(
+        url: String,
+        apiKey: String,
+        preferPlaylistWhenBothPresent: Boolean = false
+    ): PlaylistPreview = withContext(Dispatchers.IO) {
+        val parsedTarget = PlaylistUrlParser.parseTarget(url)
             ?: error("أدخل رابط قائمة تشغيل أو فيديو YouTube صحيح بصيغة HTTPS")
+        val target = when (parsedTarget) {
+            is YouTubeImportTarget.VideoAndPlaylist -> if (preferPlaylistWhenBothPresent) {
+                YouTubeImportTarget.Playlist(parsedTarget.playlistId)
+            } else {
+                YouTubeImportTarget.Video(parsedTarget.videoId)
+            }
+            else -> parsedTarget
+        }
+        val alternatePlaylistId = if (parsedTarget is YouTubeImportTarget.VideoAndPlaylist && !preferPlaylistWhenBothPresent) {
+            parsedTarget.playlistId
+        } else null
+        val alternateVideoId = if (parsedTarget is YouTubeImportTarget.VideoAndPlaylist && preferPlaylistWhenBothPresent) {
+            parsedTarget.videoId
+        } else null
         com.ilearn.app.net.requireApiKey(apiKey)
         suspend fun get(resource: String, params: Map<String, String>): JSONObject = coroutineScope {
             val endpoint = okhttp3.HttpUrl.Builder().scheme("https").host("www.googleapis.com").addPathSegments("youtube/v3/$resource")
@@ -47,6 +69,7 @@ class YouTubeMetadataClient(private val context: android.content.Context) {
         }
 
         when (target) {
+            is YouTubeImportTarget.VideoAndPlaylist -> error("Dual target must be resolved before fetch")
             is YouTubeImportTarget.Video -> {
                 val videoId = target.videoId
                 val response = get("videos", mapOf("part" to "snippet,contentDetails,status", "id" to videoId))
@@ -108,14 +131,20 @@ class YouTubeMetadataClient(private val context: android.content.Context) {
                         course = course,
                         lessons = chapterLessons,
                         detectedChaptersCount = chapterLessons.size,
-                        unsplitFallbackLesson = unsplit
+                        unsplitFallbackLesson = unsplit,
+                        isSingleVideo = true,
+                        fullVideoDurationMs = durationMs,
+                        alternatePlaylistId = alternatePlaylistId
                     )
                 } else {
                     PlaylistPreview(
                         course = course,
                         lessons = listOf(unsplit),
                         detectedChaptersCount = 0,
-                        unsplitFallbackLesson = unsplit
+                        unsplitFallbackLesson = unsplit,
+                        isSingleVideo = true,
+                        fullVideoDurationMs = durationMs,
+                        alternatePlaylistId = alternatePlaylistId
                     )
                 }
             }
@@ -155,10 +184,15 @@ class YouTubeMetadataClient(private val context: android.content.Context) {
                         details[item.getString("id")] = parseDuration(item.getJSONObject("contentDetails").getString("duration")) to item.getJSONObject("status").optBoolean("embeddable", false)
                     }
                 }
-                PlaylistPreview(course, lessons.distinctBy { it.id }.map { lesson ->
-                    val info = details[lesson.remoteId]
-                    lesson.copy(durationMs = info?.first ?: 0, isAvailable = lesson.isAvailable && info?.second == true)
-                })
+                PlaylistPreview(
+                    course = course,
+                    lessons = lessons.distinctBy { it.id }.map { lesson ->
+                        val info = details[lesson.remoteId]
+                        lesson.copy(durationMs = info?.first ?: 0, isAvailable = lesson.isAvailable && info?.second == true)
+                    },
+                    isSingleVideo = false,
+                    alternateVideoId = alternateVideoId
+                )
             }
         }
     }

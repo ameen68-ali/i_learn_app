@@ -83,9 +83,25 @@ class YouTubeTranscriptClient(baseClient: OkHttpClient = sharedClient) {
             url = "https://www.youtube.com/watch?v=$videoId",
             userAgent = DESKTOP_UA,
             acceptLanguage = "en-US,en;q=0.9,ar;q=0.8",
-            maxBytes = 4_000_000
+            maxBytes = 5_000_000
         )
-        YouTubeChapterParser.parseChaptersFromWatchHtml(html, videoDurationMs)
+        val fromHtml = YouTubeChapterParser.parseChaptersFromWatchHtml(html, videoDurationMs)
+        if (fromHtml.size >= 2) return@withContext fromHtml
+
+        val innertubeKey = extractInnertubeApiKey(html) ?: return@withContext emptyList()
+        val body = JSONObject()
+            .put("context", JSONObject().put("client", JSONObject()
+                .put("clientName", "WEB")
+                .put("clientVersion", "2.20241120.01.00")))
+            .put("videoId", videoId)
+            .toString()
+        val request = Request.Builder()
+            .url("https://www.youtube.com/youtubei/v1/next?key=$innertubeKey")
+            .post(body.toRequestBody("application/json".toMediaType()))
+            .header("User-Agent", DESKTOP_UA)
+            .build()
+        val nextJson = executeCall(request, maxBytes = 4_000_000)
+        YouTubeChapterParser.parseChaptersFromWatchHtml(nextJson, videoDurationMs)
     }
 
     suspend fun downloadAsVtt(track: YouTubeCaptionTrack): String = withContext(Dispatchers.IO) {

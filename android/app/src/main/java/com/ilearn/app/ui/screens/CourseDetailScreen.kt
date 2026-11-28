@@ -82,7 +82,8 @@ fun CourseDetailScreen(
     courseDownloadError: String? = null,
     onDownloadChapteredCourse: () -> Unit = {},
     onCancelChapteredCourseDownload: () -> Unit = {},
-    onDismissCourseDownloadError: () -> Unit = {}
+    onDismissCourseDownloadError: () -> Unit = {},
+    onReverseOrder: () -> Unit = {}
 ) {
     var selectedFilter by remember { mutableStateOf(LessonFilter.ALL) }
     var searchQuery by remember { mutableStateOf("") }
@@ -402,6 +403,21 @@ fun CourseDetailScreen(
                             ) {
                                 Icon(Icons.Default.DownloadForOffline, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                             }
+                        }
+                    }
+                    if (lessons.size >= 2 && courseDownloadState == null) {
+                        IconButton(
+                            onClick = {
+                                onReverseOrder()
+                                scope.launch {
+                                    snackbarHostState.showSnackbar("تم عكس ترتيب الدروس (${lessons.size})")
+                                }
+                            },
+                            modifier = Modifier
+                                .size(48.dp)
+                                .semantics { contentDescription = "عكس ترتيب الدروس" }
+                        ) {
+                            Icon(Icons.Default.SwapVert, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                         }
                     }
                     if (course.sourceType == com.ilearn.app.data.SourceType.YOUTUBE) {

@@ -216,6 +216,10 @@ class CourseRepository(
         youtubeDownloader.dismissCourseError(courseId)
     }
 
+    suspend fun reverseCourseOrder(courseId: String) {
+        dbHelper.reverseCourseLessonOrder(courseId)
+    }
+
     suspend fun removeOfflineYouTubeVideo(lesson: Lesson): Boolean {
         return youtubeDownloader.removeOfflineVideo(lesson)
     }

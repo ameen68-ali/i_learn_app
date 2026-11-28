@@ -201,6 +201,12 @@ class SourceDatabaseTest {
         assertEquals(120_000L, restoredLessons[1].lastPositionMs)
         assertEquals("Chain rule note", helper.getNotesForLesson(ch2.id).single().noteText)
 
+        helper.reverseCourseLessonOrder(course.id)
+        val reversedLessons = helper.getLessonsForCourse(course.id)
+        assertEquals(listOf(ch2.id, ch1.id), reversedLessons.map { it.id })
+        assertEquals(listOf(1, 2), reversedLessons.map { it.orderIndex })
+        assertEquals("Chain rule note", helper.getNotesForLesson(ch2.id).single().noteText)
+
         helper.close()
         context.deleteDatabase(dbName)
         Unit

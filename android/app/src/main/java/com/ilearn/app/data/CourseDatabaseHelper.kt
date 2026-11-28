@@ -1056,4 +1056,29 @@ class CourseDatabaseHelper(context: Context, databaseName: String = DATABASE_NAM
         }
         notifyChanged()
     }
+
+    suspend fun reverseCourseLessonOrder(courseId: String) = withContext(Dispatchers.IO) {
+        val db = writableDatabase
+        val lessonIds = mutableListOf<String>()
+        db.rawQuery(
+            "SELECT $COL_ID FROM $TABLE_LESSONS WHERE $COL_COURSE_ID = ? ORDER BY $COL_ORDER_INDEX ASC",
+            arrayOf(courseId)
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                lessonIds.add(cursor.getString(0))
+            }
+        }
+        if (lessonIds.size < 2) return@withContext
+        db.beginTransaction()
+        try {
+            lessonIds.reversed().forEachIndexed { idx, id ->
+                val values = ContentValues().apply { put(COL_ORDER_INDEX, idx + 1) }
+                db.update(TABLE_LESSONS, values, "$COL_ID = ?", arrayOf(id))
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        notifyChanged()
+    }
 }
